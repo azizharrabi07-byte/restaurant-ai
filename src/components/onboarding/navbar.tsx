@@ -1,7 +1,10 @@
+"use client";
+
 import { RefreshCw, Smartphone, CloudUpload } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { BrandMark, BrandWordmark } from "@/components/brand-logo";
+import { useI18n } from "@/lib/i18n";
 
 interface NavbarProps {
   restaurantName: string;
@@ -20,6 +23,7 @@ export function Navbar({
   onResetDemo,
   onGoToFinalStep,
 }: NavbarProps) {
+  const { t } = useI18n();
   return (
     <header className="sticky top-0 z-40 w-full h-16 border-b border-white/10 flex items-center justify-between px-4 sm:px-8 bg-[#080808]">
       {/* Left: Brand Identity */}
@@ -30,7 +34,7 @@ export function Navbar({
           </div>
           <BrandWordmark />
           <span className="text-xs uppercase tracking-widest text-white/40 ml-4 border-l border-white/20 pl-4 hidden sm:inline-block">
-            Partner Portal
+            {t("ob_partner")}
           </span>
         </Link>
       </div>
@@ -38,9 +42,9 @@ export function Navbar({
       {/* Right: Establishment & Actions */}
       <div className="flex items-center gap-3 sm:gap-5">
         <div className="text-right hidden md:block">
-          <p className="text-xs text-white/40 uppercase tracking-tighter">Restaurant</p>
+          <p className="text-xs text-white/40 uppercase tracking-tighter">{t("ob_restaurant")}</p>
           <p className="text-sm font-medium text-white truncate max-w-[140px] lg:max-w-[200px]">
-            {restaurantName || "Your Café"}
+            {restaurantName || t("ob_yourCafe")}
           </p>
         </div>
 
@@ -51,10 +55,10 @@ export function Navbar({
             type="button"
             onClick={onResetDemo}
             className="hidden sm:inline-flex items-center gap-1.5 text-xs text-white/40 hover:text-white px-2.5 py-1.5 rounded-full hover:bg-white/5 transition-colors cursor-pointer"
-            title="Reset to sample cafe data"
+            title={t("ob_resetTitle")}
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span className="text-[11px] uppercase tracking-wider">Demo Data</span>
+            <span className="text-[11px] uppercase tracking-wider">{t("ob_demoData")}</span>
           </button>
 
           <Button
@@ -65,13 +69,13 @@ export function Navbar({
             className="hidden lg:inline-flex"
           >
             <Smartphone className="w-3.5 h-3.5" />
-            {showLivePreview ? "Hide Preview" : "Side Preview"}
+            {showLivePreview ? t("ob_hidePreview") : t("ob_sidePreview")}
           </Button>
 
           {currentStep !== 5 && (
             <Button type="button" size="sm" onClick={onGoToFinalStep} className="font-bold text-xs">
               <CloudUpload className="w-3.5 h-3.5 text-black" />
-              Publish
+              {t("ob_publish")}
             </Button>
           )}
         </div>

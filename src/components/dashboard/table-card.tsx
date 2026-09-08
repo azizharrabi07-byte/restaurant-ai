@@ -1,5 +1,6 @@
 import { Download } from "lucide-react";
 import type { MenuTable } from "@/lib/constants";
+import { useI18n } from "@/lib/i18n";
 import { downloadQrPng } from "@/lib/qr";
 import { QrImage } from "@/components/qr-image";
 
@@ -11,11 +12,12 @@ interface TableCardProps {
 }
 
 export function TableCard({ table, menuUrl, restaurantName, brandColor }: TableCardProps) {
+  const { t } = useI18n();
   return (
     <div className="rounded-xl border border-white/10 bg-[#0D0D0D] overflow-hidden animate-fade-up">
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
         <div className="flex items-center gap-2">
-          <span className="text-[9px] font-mono uppercase tracking-widest text-white/40">Table</span>
+          <span className="text-[9px] font-mono uppercase tracking-widest text-white/40">{t("tb_tableLabel")}</span>
           <span className="font-mono font-bold text-white text-sm">
             {String(table.number).padStart(2, "0")}
           </span>
@@ -23,7 +25,7 @@ export function TableCard({ table, menuUrl, restaurantName, brandColor }: TableC
         <span
           className="w-2 h-2 rounded-full"
           style={{ backgroundColor: brandColor }}
-          title="Linked to your brand"
+          title={t("tb_linked")}
         />
       </div>
 
@@ -33,7 +35,7 @@ export function TableCard({ table, menuUrl, restaurantName, brandColor }: TableC
         </div>
         <div className="w-full">
           <p className="text-[9px] font-mono uppercase tracking-widest text-white/40 text-center mb-1">
-            Menu URL
+            {t("tb_menuUrl")}
           </p>
           <p className="text-[11px] font-mono text-white/60 truncate text-center" title={menuUrl}>
             {menuUrl}
@@ -48,7 +50,7 @@ export function TableCard({ table, menuUrl, restaurantName, brandColor }: TableC
           className="w-full inline-flex items-center justify-center gap-2 h-9 rounded-full text-xs font-semibold text-white/70 border border-white/10 bg-transparent hover:bg-white/5 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
         >
           <Download className="w-3.5 h-3.5" />
-          Download QR
+          {t("tb_downloadQr")}
         </button>
       </div>
     </div>

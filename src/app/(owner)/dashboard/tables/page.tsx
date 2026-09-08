@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Printer, Download, Wand2 } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { downloadAllQrPngs } from "@/lib/qr";
 import { appBaseUrl, slugify } from "@/lib/utils";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 
 export default function TablesPage() {
   const { restaurantName, brandColor, tables, generateTables } = useOnboarding();
+  const { t, plural } = useI18n();
   const [count, setCount] = useState(tables.length || 6);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -25,8 +27,8 @@ export default function TablesPage() {
   const handleGenerate = () => {
     const n = Math.max(1, Math.min(40, Number(count) || 6));
     generateTables(n);
-    toast.success(`${n} table${n === 1 ? "" : "s"} created`, {
-      description: "Each table now has its own unique QR code.",
+    toast.success(plural(n, "tb_generated_one", "tb_generated_other"), {
+      description: t("tb_generatedDesc"),
     });
   };
 
@@ -37,8 +39,8 @@ export default function TablesPage() {
       await downloadAllQrPngs(
         tables.map((t) => ({ value: urlFor(t.token), filename: `table-${t.number}.png` })),
       );
-      toast.success(`Downloading ${tables.length} QR code${tables.length === 1 ? "" : "s"}`, {
-        description: "Check your downloads folder.",
+      toast.success(plural(tables.length, "tb_downloading_one", "tb_downloading_other"), {
+        description: t("tb_downloadingDesc"),
       });
     } finally {
       setIsDownloading(false);
@@ -48,9 +50,9 @@ export default function TablesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Owner · Tables & QR"
-        title="Tables & QR codes"
-        description="Generate a unique menu QR code for every table. Guests scan, browse, and order from their phone."
+        eyebrow={t("tb_eyebrow")}
+        title={t("tb_title")}
+        description={t("tb_desc")}
       />
 
       {/* Controls */}
@@ -61,7 +63,7 @@ export default function TablesPage() {
               htmlFor="table-count"
               className="text-[10px] font-mono uppercase tracking-widest text-white/40"
             >
-              Tables
+              {t("tb_tablesLabel")}
             </label>
             <Input
               id="table-count"
@@ -75,7 +77,7 @@ export default function TablesPage() {
           </div>
           <Button type="button" className="font-bold" onClick={handleGenerate}>
             <Wand2 className="w-3.5 h-3.5 text-black" />
-            Generate Tables
+            {t("tb_generate")}
           </Button>
         </div>
         <div className="flex items-center gap-2">
@@ -87,7 +89,7 @@ export default function TablesPage() {
             disabled={tables.length === 0 || isDownloading}
           >
             <Download className="w-3.5 h-3.5" />
-            Download All
+            {t("tb_downloadAll")}
           </Button>
           <Button
             type="button"
@@ -97,21 +99,21 @@ export default function TablesPage() {
             disabled={tables.length === 0}
           >
             <Printer className="w-3.5 h-3.5" />
-            Print QR Codes
+            {t("tb_print")}
           </Button>
         </div>
       </div>
 
       {/* Print-only sheet */}
       <div className="hidden print:grid print:grid-cols-3 print:gap-6">
-        {tables.map((t) => (
-          <div key={t.id} className="flex flex-col items-center border border-black/20 rounded-lg p-4">
+        {tables.map((tb) => (
+          <div key={tb.id} className="flex flex-col items-center border border-black/20 rounded-lg p-4">
             <span className="text-[10px] font-mono uppercase tracking-widest mb-3">
-              {displayName} · Table {String(t.number).padStart(2, "0")}
+              {t("tb_printHeader", { name: displayName, t: String(tb.number).padStart(2, "0") })}
             </span>
-            <QrImage value={urlFor(t.token)} size={140} />
+            <QrImage value={urlFor(tb.token)} size={140} />
             <span className="text-[9px] font-mono text-black/50 mt-3 break-all text-center">
-              {urlFor(t.token)}
+              {urlFor(tb.token)}
             </span>
           </div>
         ))}
@@ -120,20 +122,18 @@ export default function TablesPage() {
       {/* Live grid */}
       {tables.length === 0 ? (
         <div className="rounded-xl border border-white/10 bg-[#0D0D0D] py-24 text-center">
-          <p className="text-sm text-white/60 font-medium">No tables yet</p>
+          <p className="text-sm text-white/60 font-medium">{t("tb_noTables")}</p>
           <p className="text-xs text-white/40 mt-1.5 max-w-sm mx-auto">
-            Pick a number above and hit{" "}
-            <span className="text-white/70 font-mono">Generate Tables</span> to create your
-            printable QR codes.
+            {t("tb_noTablesDesc")}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 print:hidden">
-          {tables.map((t) => (
+          {tables.map((tb) => (
             <TableCard
-              key={t.id}
-              table={t}
-              menuUrl={urlFor(t.token)}
+              key={tb.id}
+              table={tb}
+              menuUrl={urlFor(tb.token)}
               restaurantName={displayName}
               brandColor={brandColor.value}
             />

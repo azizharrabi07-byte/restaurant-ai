@@ -12,7 +12,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDT } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import { LangCurSwitcher } from "@/components/lang-cur-switcher";
 import type { Category, MenuTheme, Product } from "@/lib/constants";
 import {
   Dialog,
@@ -58,6 +59,8 @@ export function GuestMenu({
   const [cartOpen, setCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  const { t, plural, formatPrice } = useI18n();
 
   const accent = restaurant?.brandColor.value ?? "#D97706";
   const variant =
@@ -133,11 +136,11 @@ export function GuestMenu({
         setCartOpen(false);
       } else {
         window.alert(
-          data.message ?? "Ordering isn't live yet on this device. Please order at the counter.",
+          data.message ?? t("g_counterError"),
         );
       }
     } catch {
-      window.alert("Could not reach the kitchen. Please order at the counter.");
+      window.alert(t("g_networkError"));
     } finally {
       setSubmitting(false);
     }
@@ -148,10 +151,9 @@ export function GuestMenu({
       <div className="min-h-dvh bg-[#050505] text-white flex items-center justify-center px-6">
         <div className="text-center max-w-md">
           <UtensilsCrossed className="w-10 h-10 text-white/20 mx-auto mb-4" />
-          <h1 className="font-serif italic text-2xl">This menu isn&apos;t live yet</h1>
+          <h1 className="font-serif italic text-2xl">{t("g_notliveTitle")}</h1>
           <p className="text-sm text-white/40 mt-2 leading-relaxed">
-            The owner hasn&apos;t published their menu yet. Please ask for a printed menu or
-            order at the counter.
+            {t("g_notliveDesc")}
           </p>
         </div>
       </div>
@@ -192,8 +194,9 @@ export function GuestMenu({
         <div className="absolute top-3 left-0 right-0 flex items-center justify-between px-4">
           <span className="bg-black/70 backdrop-blur px-3 py-1.5 rounded-full border border-white/10 text-[11px] font-mono flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Dine-in · Table {String(tableNo).padStart(2, "0")}
+            {t("g_dinein", { t: String(tableNo).padStart(2, "0") })}
           </span>
+          <LangCurSwitcher />
         </div>
       </div>
 
@@ -223,7 +226,7 @@ export function GuestMenu({
             </div>
             <h1 className="text-2xl font-medium tracking-tight mt-3">{r.name}</h1>
             <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 mt-1">
-              Open now
+              {t("g_open")}
             </span>
           </div>
           {r.tagline && (
@@ -255,7 +258,7 @@ export function GuestMenu({
             </div>
             <div className="pb-1 min-w-0">
               <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400">
-                Open now
+                {t("g_open")}
               </span>
               <h1
                 className={cn(
@@ -286,7 +289,7 @@ export function GuestMenu({
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
           <input
             type="text"
-            placeholder="Search dishes, drinks..."
+            placeholder={t("g_search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className={cn(
@@ -323,7 +326,7 @@ export function GuestMenu({
               : undefined
           }
         >
-          All ({prods.length})
+          {t("g_all", { n: prods.length })}
         </button>
         {cats.map((c) => {
           const count = prods.filter((p) => p.categoryId === c.id).length;
@@ -386,7 +389,7 @@ export function GuestMenu({
                         style={{ color: accent }}
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Add
+                        {t("g_add")}
                       </button>
                     ) : (
                       <button
@@ -396,7 +399,7 @@ export function GuestMenu({
                         style={{ backgroundColor: accent }}
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Add
+                        {t("g_add")}
                       </button>
                     );
 
@@ -443,7 +446,7 @@ export function GuestMenu({
                           </div>
                           <div className="flex flex-col items-end gap-1.5 shrink-0">
                             <span className="text-sm font-mono font-bold text-white/80">
-                              {formatDT(p.price)}
+                              {formatPrice(p.price)}
                             </span>
                             {qtyControl}
                           </div>
@@ -490,7 +493,7 @@ export function GuestMenu({
                                 {p.name}
                               </h3>
                               <span className="text-sm font-mono font-bold shrink-0">
-                                {formatDT(p.price)}
+                                {formatPrice(p.price)}
                               </span>
                             </div>
                             {p.description && (
@@ -536,7 +539,7 @@ export function GuestMenu({
                           </div>
                           <div className="flex items-center justify-between mt-2">
                             <span className="text-sm font-mono font-bold">
-                              {formatDT(p.price)}
+                              {formatPrice(p.price)}
                             </span>
                             {qtyControl}
                           </div>
@@ -551,7 +554,7 @@ export function GuestMenu({
         {filtered.length === 0 && (
           <div className="py-12 text-center bg-[#0D0D0D] rounded-xl border border-dashed border-white/10">
             <UtensilsCrossed className="w-6 h-6 text-white/20 mx-auto mb-2" />
-            <p className="text-xs font-medium text-white/40">No menu items found</p>
+            <p className="text-xs font-medium text-white/40">{t("g_noItems")}</p>
           </div>
         )}
       </div>
@@ -566,10 +569,9 @@ export function GuestMenu({
             >
               <Check className="w-8 h-8 text-white" />
             </div>
-            <h2 className="font-serif italic text-3xl mt-6">Order #{confirm.number}</h2>
+            <h2 className="font-serif italic text-3xl mt-6">{t("g_confirmTitle", { n: confirm.number })}</h2>
             <p className="text-sm text-white/50 mt-3 leading-relaxed">
-              Your order for <span className="text-white/80">{formatDT(confirm.total)}</span> is
-              with the kitchen. Pay at the counter when it arrives — we&apos;ll call your table.
+              {t("g_confirmBody", { total: formatPrice(confirm.total) })}
             </p>
             <Button
               type="button"
@@ -577,7 +579,7 @@ export function GuestMenu({
               onClick={() => setConfirm(null)}
             >
               <ArrowLeft className="w-4 h-4 text-black" />
-              Back to menu
+              {t("g_backMenu")}
             </Button>
           </div>
         </div>
@@ -593,9 +595,9 @@ export function GuestMenu({
           >
             <span className="flex items-center gap-2 text-sm font-bold">
               <ShoppingBag className="w-4 h-4" />
-              {cartCount} {cartCount === 1 ? "item" : "items"}
+              {plural(cartCount, "common_items_one", "common_items_other")}
             </span>
-            <span className="font-mono font-bold text-sm">{formatDT(cartTotal)}</span>
+            <span className="font-mono font-bold text-sm">{formatPrice(cartTotal)}</span>
           </button>
         </div>
       )}
@@ -604,9 +606,9 @@ export function GuestMenu({
       <Dialog open={cartOpen} onOpenChange={setCartOpen}>
         <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Your order</DialogTitle>
+            <DialogTitle>{t("g_cartTitle")}</DialogTitle>
             <DialogDescription>
-              Review your items, then send the order to the kitchen.
+              {t("g_cartDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -616,7 +618,7 @@ export function GuestMenu({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">{product.name}</p>
                   <p className="text-xs text-white/40 font-mono mt-0.5">
-                    {formatDT(product.price)} × {qty}
+                    {formatPrice(product.price)} × {qty}
                   </p>
                 </div>
                 <div className="flex items-center gap-2.5">
@@ -641,8 +643,8 @@ export function GuestMenu({
           </div>
 
           <div className="flex items-center justify-between pt-3 pb-1">
-            <span className="text-sm text-white/50">Total</span>
-            <span className="font-mono font-bold text-base">{formatDT(cartTotal)}</span>
+            <span className="text-sm text-white/50">{t("g_cartTotal")}</span>
+            <span className="font-mono font-bold text-base">{formatPrice(cartTotal)}</span>
           </div>
 
           <Button
@@ -656,10 +658,10 @@ export function GuestMenu({
             ) : (
               <Check className="w-4 h-4 text-black" />
             )}
-            Send Order to Kitchen
+            {t("g_cartSend")}
           </Button>
           <p className="text-[11px] text-white/40 text-center mt-2 leading-relaxed">
-            You&apos;ll pay at the counter once your order is ready.
+            {t("g_cartPaynote")}
           </p>
         </DialogContent>
       </Dialog>

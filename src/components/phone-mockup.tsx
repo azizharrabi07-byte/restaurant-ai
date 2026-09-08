@@ -3,10 +3,20 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { type Category, type MenuTheme, type Product } from "@/lib/constants";
-import { formatDT } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { Wifi, Battery, Search, Plus, UtensilsCrossed } from "lucide-react";
 
-const defaultFormatPrice = formatDT;
+type PhoneLabelKey =
+  | "search"
+  | "all"
+  | "add"
+  | "open_now"
+  | "dine_in"
+  | "type"
+  | "scan"
+  | "viewport"
+  | "no_items"
+  | "add_prompt";
 
 interface PhoneMockupProps {
   restaurantName: string;
@@ -18,21 +28,8 @@ interface PhoneMockupProps {
   theme?: MenuTheme;
   className?: string;
   formatPrice?: (price: number) => string;
-  labels?: Partial<typeof DEFAULT_LABELS>;
+  labels?: Partial<Record<PhoneLabelKey, string>>;
 }
-
-const DEFAULT_LABELS = {
-  search: "Search dishes, coffees, drinks...",
-  all: "All Items",
-  add: "Add",
-  open_now: "Open Now",
-  dine_in: "Table 04 · Dine-In",
-  type: "Café & Kitchen",
-  scan: "Scan to order",
-  viewport: "Customer Mobile Viewport (375 × 667)",
-  no_items: "No menu items found",
-  add_prompt: "Try adjusting your search terms",
-};
 
 export function PhoneMockup({
   restaurantName,
@@ -43,12 +40,26 @@ export function PhoneMockup({
   cover,
   theme = "classic",
   className,
-  formatPrice = defaultFormatPrice,
+  formatPrice,
   labels: labelsProp,
 }: PhoneMockupProps) {
   const [selectedCategoryId, setSelectedCategoryId] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const labels = { ...DEFAULT_LABELS, ...labelsProp };
+  const { t, formatPrice: formatPriceI18n } = useI18n();
+  const fmt = formatPrice ?? formatPriceI18n;
+  const labels = {
+    search: t("g_search"),
+    all: t("common_all"),
+    add: t("g_add"),
+    open_now: t("g_open"),
+    dine_in: t("g_dineDemo"),
+    type: t("g_type"),
+    scan: t("g_scan"),
+    viewport: t("g_viewport"),
+    no_items: t("g_noItems"),
+    add_prompt: t("g_addPrompt"),
+    ...labelsProp,
+  };
 
   const displayName = restaurantName || "Your Café";
 
@@ -311,7 +322,7 @@ export function PhoneMockup({
                     <p className="text-[11px] text-white/30 mt-1">
                       {searchQuery
                         ? labels.add_prompt
-                        : "Add products in Step 4 to populate your menu"}
+                        : t("g_addStep4")}
                     </p>
                   </div>
                 ) : (
@@ -337,7 +348,7 @@ export function PhoneMockup({
                           </div>
                           <div className="flex flex-col items-end gap-1 shrink-0">
                             <span className="text-xs font-mono text-white font-bold">
-                              {formatPrice(prod.price)}
+                              {fmt(prod.price)}
                             </span>
                             <span
                               className="text-[11px] font-semibold text-white flex items-center gap-0.5"
@@ -393,7 +404,7 @@ export function PhoneMockup({
                               )}
                             </div>
                             <span className="text-xs font-mono text-white font-bold shrink-0">
-                            {formatPrice(prod.price)}
+                            {fmt(prod.price)}
                           </span>
                           </div>
                         </div>
@@ -423,7 +434,7 @@ export function PhoneMockup({
                           {/* Price & Add button */}
                           <div className="flex items-center justify-between mt-2 pt-1">
                             <span className="text-xs font-mono text-white font-bold">
-                              {formatPrice(prod.price)}
+                              {fmt(prod.price)}
                             </span>
                             <span
                               className="text-[11px] px-2.5 py-1 rounded-full font-medium text-white flex items-center gap-1 shadow-xs"

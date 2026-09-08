@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { useOrders } from "@/lib/use-orders";
-import { formatDT } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { hexToRgba } from "@/lib/utils";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -24,17 +24,19 @@ import { OrderCard } from "@/components/dashboard/order-card";
 export default function OverviewPage() {
   const { brandColor } = useOnboarding();
   const { orders } = useOrders();
+  const { t, plural, formatPrice, lang } = useI18n();
   const [todayLabel, setTodayLabel] = useState("");
 
   useEffect(() => {
+    const locale = lang === "fr" ? "fr-FR" : lang === "ar" ? "ar-TN" : "en-GB";
     setTodayLabel(
-      new Date().toLocaleDateString("en-GB", {
+      new Date().toLocaleDateString(locale, {
         weekday: "short",
         day: "numeric",
         month: "short",
       }),
     );
-  }, []);
+  }, [lang]);
 
   const paid = orders.filter((o) => o.status === "paid");
   const accepted = orders.filter((o) => o.status === "accepted");
@@ -75,15 +77,15 @@ export default function OverviewPage() {
   return (
     <>
       <PageHeader
-        eyebrow={`Overview · ${todayLabel || "Today"}`}
-        title="Today at a glance"
-        description="A live snapshot of your service — revenue, orders, and what guests are loving right now."
+        eyebrow={`${t("ov_eyebrow")} · ${todayLabel || t("ov_today")}`}
+        title={t("ov_title")}
+        description={t("ov_desc")}
         actions={
           <Link
             href="/dashboard/orders"
             className="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-white/50 hover:text-white transition-colors"
           >
-            View all orders
+            {t("ov_viewAll")}
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         }
@@ -92,26 +94,26 @@ export default function OverviewPage() {
       {/* KPI grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
-          label="Today's Revenue"
-          value={formatDT(revenue)}
-          sub={`${paid.length} paid order${paid.length === 1 ? "" : "s"}`}
+          label={t("ov_revenue")}
+          value={formatPrice(revenue)}
+          sub={plural(paid.length, "ov_paidSub_one", "ov_paidSub_other")}
           icon={Wallet}
           accent={brandColor.value}
         />
-        <StatCard label="Total Orders" value={orders.length} sub="Today" icon={ReceiptText} />
+        <StatCard label={t("ov_totalOrders")} value={orders.length} sub={t("ov_today")} icon={ReceiptText} />
         <StatCard
-          label="Pending"
+          label={t("status_pending")}
           value={pending.length}
-          sub="awaiting action"
+          sub={t("ov_awaiting")}
           icon={Hourglass}
           accent={hexToRgba("#D97706", 0.25)}
         />
-        <StatCard label="Accepted" value={accepted.length} sub="in the kitchen" icon={CheckCircle2} />
-        <StatCard label="Paid" value={paid.length} sub="completed" icon={CircleCheck} />
+        <StatCard label={t("status_accepted")} value={accepted.length} sub={t("ov_inKitchen")} icon={CheckCircle2} />
+        <StatCard label={t("status_paid")} value={paid.length} sub={t("ov_completed")} icon={CircleCheck} />
         <StatCard
-          label="Avg. Order Value"
-          value={formatDT(avgOrder)}
-          sub="per paid order"
+          label={t("ov_avgOrder")}
+          value={formatPrice(avgOrder)}
+          sub={t("ov_perPaid")}
           icon={TrendingUp}
         />
       </div>
@@ -122,9 +124,9 @@ export default function OverviewPage() {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h3 className="text-xs font-mono uppercase tracking-widest text-white/60">
-                Revenue by hour
+                {t("ov_revByHour")}
               </h3>
-              <p className="text-[11px] text-white/40 mt-0.5">What each hour generated so far</p>
+              <p className="text-[11px] text-white/40 mt-0.5">{t("ov_revByHourSub")}</p>
             </div>
             <span
               className="w-2 h-2 rounded-full"
@@ -141,12 +143,12 @@ export default function OverviewPage() {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h3 className="text-xs font-mono uppercase tracking-widest text-white/60">
-                Orders by hour
+                {t("ov_ordersByHour")}
               </h3>
               <p className="text-[11px] text-white/40 mt-0.5">
                 {peak
-                  ? `Peak: ${peak.hour}:00 · ${peak.value} order${peak.value === 1 ? "" : "s"}`
-                  : "No orders yet today"}
+                  ? t("ov_peak", { hour: `${peak.hour}:00`, count: peak.value })
+                  : t("ov_noOrdersToday")}
               </p>
             </div>
           </div>
@@ -160,13 +162,13 @@ export default function OverviewPage() {
           <div className="flex items-center gap-2 mb-4">
             <Star className="w-3.5 h-3.5" style={{ color: brandColor.value }} />
             <h3 className="text-xs font-mono uppercase tracking-widest text-white/60">
-              Best-selling products
+              {t("ov_bestSellers")}
             </h3>
           </div>
           <div className="divide-y divide-white/5">
             {bestSellers.length === 0 ? (
               <p className="py-8 text-center text-xs text-white/30 font-mono uppercase tracking-wider">
-                No sales yet — charts fill in as guests order
+                {t("ov_noSales")}
               </p>
             ) : (
               bestSellers.map((item, i) => (
@@ -183,9 +185,9 @@ export default function OverviewPage() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-white font-medium truncate">{item.name}</p>
-                  <p className="text-[11px] text-white/40 font-mono">{item.qty} sold</p>
+                  <p className="text-[11px] text-white/40 font-mono">{plural(item.qty, "ov_sold_one", "ov_sold_other")}</p>
                 </div>
-                <span className="text-sm font-mono text-white/70 shrink-0">{formatDT(item.revenue)}</span>
+                <span className="text-sm font-mono text-white/70 shrink-0">{formatPrice(item.revenue)}</span>
               </div>
             ))
             )}
@@ -195,19 +197,19 @@ export default function OverviewPage() {
         <div className="rounded-xl border border-white/10 bg-[#0D0D0D] p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xs font-mono uppercase tracking-widest text-white/60">
-              Recent orders
+              {t("ov_recentOrders")}
             </h3>
             <Link
               href="/dashboard/orders"
               className="text-[11px] font-mono uppercase tracking-wider text-white/40 hover:text-white transition-colors"
             >
-              See all
+              {t("ov_seeAll")}
             </Link>
           </div>
           <div className="space-y-3">
             {recent.length === 0 ? (
               <p className="py-8 text-center text-xs text-white/30 font-mono uppercase tracking-wider">
-                No orders yet — the first guest scan will land here
+                {t("ov_noOrdersYet")}
               </p>
             ) : (
               recent.map((order) => (

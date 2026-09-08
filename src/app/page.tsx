@@ -36,6 +36,7 @@ const LANGS: { key: LandingLang; label: string }[] = [
 ];
 
 const CURRENCIES: { key: LandingCurrency; label: string; symbol: string }[] = [
+  { key: "tnd", label: "TND", symbol: "DT" },
   { key: "usd", label: "USD", symbol: "$" },
   { key: "eur", label: "EUR", symbol: "€" },
 ];

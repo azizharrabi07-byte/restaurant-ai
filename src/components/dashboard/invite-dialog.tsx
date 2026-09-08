@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Copy, ShieldCheck, CreditCard } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { makeToken, appBaseUrl } from "@/lib/utils";
 import type { WorkerRole } from "@/lib/constants";
 import { QrImage } from "@/components/qr-image";
@@ -23,9 +24,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const ROLE_META: Record<WorkerRole, { icon: typeof ShieldCheck; hint: string }> = {
-  Cashier: { icon: CreditCard, hint: "Handles the register and accepts orders in the terminal." },
-  Manager: { icon: ShieldCheck, hint: "Full oversight of tables, workers, and live orders." },
+const ROLE_META: Record<WorkerRole, { icon: typeof ShieldCheck; hintKey: string }> = {
+  Cashier: { icon: CreditCard, hintKey: "inv_roleCashierHint" },
+  Manager: { icon: ShieldCheck, hintKey: "inv_roleManagerHint" },
 };
 
 interface InviteDialogProps {
@@ -35,6 +36,7 @@ interface InviteDialogProps {
 
 export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
   const { createInvite, restaurantName, brandColor } = useOnboarding();
+  const { t } = useI18n();
   const [role, setRole] = useState<WorkerRole>("Cashier");
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -76,10 +78,10 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
           <>
             <DialogHeader>
               <DialogTitle className="text-xl font-serif italic text-white">
-                Invite a worker
+                {t("inv_dlgTitle")}
               </DialogTitle>
               <DialogDescription>
-                Choose a role, then we’ll generate a private invite QR for them.
+                {t("inv_dlgDesc")}
               </DialogDescription>
             </DialogHeader>
 
@@ -98,14 +100,14 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
               </div>
               <div className="flex items-start gap-2.5 rounded-lg bg-white/[0.03] border border-white/10 p-3">
                 <RoleIcon className="w-4 h-4 mt-0.5 text-white/40 shrink-0" />
-                <p className="text-xs text-white/40 leading-relaxed">{ROLE_META[role].hint}</p>
+                <p className="text-xs text-white/40 leading-relaxed">{t(ROLE_META[role].hintKey)}</p>
               </div>
 
               <Button type="button" className="w-full font-bold" onClick={handleGenerate}>
-                Generate Invite
+                {t("inv_generate")}
               </Button>
               <p className="text-center text-[10px] font-mono uppercase tracking-widest text-white/35">
-                Expires automatically in 24 hours
+                {t("inv_expiresAuto")}
               </p>
             </div>
           </>
@@ -113,11 +115,10 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
           <>
             <DialogHeader>
               <DialogTitle className="text-xl font-serif italic text-white">
-                Invite ready
+                {t("inv_readyTitle")}
               </DialogTitle>
               <DialogDescription>
-                Share this link — or let them scan the QR to accept as{" "}
-                <span className="text-white/70 font-medium">{role}</span>.
+                {t("inv_readyDesc", { role })}
               </DialogDescription>
             </DialogHeader>
 
@@ -128,7 +129,7 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
 
               <div className="w-full space-y-1">
                 <p className="text-[9px] font-mono uppercase tracking-widest text-white/40">
-                  Invite link
+                  {t("inv_linkLabel")}
                 </p>
                 <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#111111] px-3 py-2.5">
                   <span className="flex-1 text-xs font-mono text-white/80 truncate">{link}</span>
@@ -146,10 +147,10 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                 </div>
                 <div className="flex items-center justify-between pt-1.5">
                   <span className="text-[10px] font-mono uppercase tracking-widest text-white/35">
-                    {role} · expires in 24 hours
+                    {t("inv_expires24Short", { role })}
                   </span>
                   <span className={cn("text-[10px] font-mono text-amber-400/90 uppercase")}>
-                    Awaiting accept
+                    {t("inv_awaiting")}
                   </span>
                 </div>
               </div>
@@ -163,7 +164,7 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                   setRole("Cashier");
                 }}
               >
-                Create another invite
+                {t("inv_createAnother")}
               </Button>
             </div>
           </>

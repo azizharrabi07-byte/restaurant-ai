@@ -12,11 +12,13 @@ import { StepCategories } from "@/components/onboarding/step-categories";
 import { StepProducts } from "@/components/onboarding/step-products";
 import { StepPreview } from "@/components/onboarding/step-preview";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { PhoneMockup } from "@/components/phone-mockup";
 
 function WizardInner() {
   const [step, setStep] = useState(1);
   const [showLivePreview, setShowLivePreview] = useState(true);
+  const { t } = useI18n();
 
   const {
     restaurantName,
@@ -79,13 +81,13 @@ function WizardInner() {
       {/* Navigation Footer */}
       <div className="pt-6 flex items-center justify-between border-t border-white/5 mt-8">
         <span className="text-xs text-white/40 uppercase tracking-widest font-mono hidden sm:block">
-          Next: {STEPS[step]?.shortTitle ?? ""}
+          {t("ob_next", { name: t(STEPS[step]?.shortKey ?? "") })}
         </span>
         <div className={cn("flex items-center gap-2", step === 1 && "ml-auto")}>
           {step > 1 && (
             <Button type="button" variant="outline" onClick={goBack}>
               <ArrowLeft className="w-4 h-4" />
-              Back
+              {t("ob_back")}
             </Button>
           )}
           <Button
@@ -95,7 +97,7 @@ function WizardInner() {
             disabled={!canContinue}
             className="min-w-[200px]"
           >
-            Continue
+            {t("ob_continue")}
             <ArrowRight className="w-4 h-4" />
           </Button>
         </div>
@@ -128,7 +130,7 @@ function WizardInner() {
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <p className="text-[10px] font-mono uppercase tracking-widest text-white/40">
-                    Syncing live
+                    {t("ob_syncing")}
                   </p>
                 </div>
                 <PhoneMockup
@@ -147,7 +149,7 @@ function WizardInner() {
                   className="text-xs text-white/50 hover:text-white font-mono uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer transition-colors"
                 >
                   <Eye className="w-3.5 h-3.5" />
-                  Open full preview
+                  {t("ob_fullPreview")}
                 </button>
               </div>
             </aside>

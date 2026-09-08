@@ -1,25 +1,27 @@
 import { cn } from "@/lib/utils";
 import type { OrderStatus } from "@/lib/constants";
+import { useI18n } from "@/lib/i18n";
 
-const STATUS_META: Record<OrderStatus, { label: string; className: string; dot: string }> = {
+const STATUS_META: Record<OrderStatus, { labelKey: string; className: string; dot: string }> = {
   pending: {
-    label: "Pending",
+    labelKey: "status_pending",
     className: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     dot: "bg-amber-400",
   },
   accepted: {
-    label: "Accepted",
+    labelKey: "status_accepted",
     className: "bg-white/5 text-white/70 border-white/10",
     dot: "bg-white/60",
   },
   paid: {
-    label: "Paid",
+    labelKey: "status_paid",
     className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
     dot: "bg-emerald-400",
   },
 };
 
 export function StatusBadge({ status }: { status: OrderStatus }) {
+  const { t } = useI18n();
   const meta = STATUS_META[status];
   return (
     <span
@@ -29,7 +31,7 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
       )}
     >
       <span className={cn("w-1.5 h-1.5 rounded-full", meta.dot, status === "pending" && "animate-pulse")} />
-      {meta.label}
+      {t(meta.labelKey)}
     </span>
   );
 }

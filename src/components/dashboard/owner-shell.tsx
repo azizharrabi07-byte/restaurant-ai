@@ -12,23 +12,26 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { hexToRgba } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { RestaurantLogo } from "@/components/restaurant-logo";
 import { SaveStatus } from "@/components/dashboard/save-status";
+import { LangCurSwitcher } from "@/components/lang-cur-switcher";
 
 const NAV = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true },
-  { href: "/dashboard/orders", label: "Orders", icon: ReceiptText, exact: false },
-  { href: "/dashboard/tables", label: "Tables & QR", icon: QrCode, exact: true },
-  { href: "/dashboard/workers", label: "Workers", icon: Users, exact: true },
-  { href: "/dashboard/menu", label: "Menu", icon: UtensilsCrossed, exact: true },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings, exact: true },
+  { href: "/dashboard", labelKey: "nav_overview", icon: LayoutDashboard, exact: true },
+  { href: "/dashboard/orders", labelKey: "nav_orders", icon: ReceiptText, exact: false },
+  { href: "/dashboard/tables", labelKey: "nav_tables", icon: QrCode, exact: true },
+  { href: "/dashboard/workers", labelKey: "nav_workers", icon: Users, exact: true },
+  { href: "/dashboard/menu", labelKey: "nav_menu", icon: UtensilsCrossed, exact: true },
+  { href: "/dashboard/settings", labelKey: "nav_settings", icon: Settings, exact: true },
 ];
 
 export function OwnerShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { restaurantName, logo, brandColor } = useOnboarding();
+  const { t } = useI18n();
   const displayName = restaurantName || "Velvet & Stone Coffee";
 
   const isActive = (item: (typeof NAV)[number]) =>
@@ -50,7 +53,7 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
           className="w-4 h-4 shrink-0"
           style={active ? { color: brandColor.value } : undefined}
         />
-        <span className="truncate">{item.label}</span>
+        <span className="truncate">{t(item.labelKey)}</span>
         {active && (
           <span
             className="ml-auto w-1.5 h-1.5 rounded-full shrink-0"
@@ -72,7 +75,7 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
               {displayName}
             </p>
             <p className="text-[9px] uppercase tracking-widest text-white/40 font-mono mt-0.5">
-              Owner Dashboard
+              {t("owner_dashboard")}
             </p>
           </div>
         </Link>
@@ -85,8 +88,11 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
             className="flex items-center gap-3 mx-0 px-3 py-2 rounded-lg text-sm text-white/50 hover:text-white hover:bg-white/5 transition-colors"
           >
             <PenLine className="w-4 h-4" />
-            <span>Edit Menu</span>
+            <span>{t("owner_editMenu")}</span>
           </Link>
+          <div className="flex justify-center py-2 px-1 rounded-lg bg-white/[0.03] border border-white/5">
+            <LangCurSwitcher className="scale-[0.95] origin-center" />
+          </div>
           <div className="flex justify-center py-1 rounded-lg bg-white/[0.03] border border-white/5">
             <SaveStatus />
           </div>
@@ -106,7 +112,7 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
               href="/dashboard/menu"
               className="text-[10px] font-mono uppercase tracking-wider text-white/50 hover:text-white px-3 py-1.5 rounded-full border border-white/10"
             >
-              Edit Menu
+              {t("owner_editMenu")}
             </Link>
           </div>
           <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar px-3 pb-2.5">
@@ -122,7 +128,7 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <item.icon className="w-3.5 h-3.5" />
-                {item.label}
+                {t(item.labelKey)}
               </a>
             ))}
           </nav>

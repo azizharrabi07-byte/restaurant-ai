@@ -10,13 +10,14 @@ import { StepCategories } from "@/components/onboarding/step-categories";
 import { StepProducts } from "@/components/onboarding/step-products";
 import { PhoneMockup } from "@/components/phone-mockup";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { id: "business", label: "Identity", icon: Store },
-  { id: "branding", label: "Look & Feel", icon: Palette },
-  { id: "categories", label: "Categories", icon: FolderTree },
-  { id: "products", label: "Products", icon: UtensilsCrossed },
+  { id: "business", labelKey: "me_tabIdentity", icon: Store },
+  { id: "branding", labelKey: "me_tabFF", icon: Palette },
+  { id: "categories", labelKey: "me_tabCategories", icon: FolderTree },
+  { id: "products", labelKey: "me_tabProducts", icon: UtensilsCrossed },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -26,6 +27,7 @@ export default function MenuEditorPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const { restaurantName, logo, brandColor, categories, products, cover, theme } =
     useOnboarding();
+  const { t } = useI18n();
 
   const preview = (
     <PhoneMockup
@@ -43,9 +45,9 @@ export default function MenuEditorPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Owner · Menu Editor"
-        title="Menu & branding"
-        description="Everything guests see when they scan your QR code. Changes autosave as you edit."
+        eyebrow={t("me_eyebrow")}
+        title={t("me_title")}
+        description={t("me_desc")}
         actions={<SaveStatus />}
       />
 
@@ -62,12 +64,12 @@ export default function MenuEditorPage() {
           )}
         >
           <Smartphone className="w-3.5 h-3.5" />
-          {previewOpen ? "Hide phone preview" : "Show phone preview"}
+          {previewOpen ? t("me_hidePreview") : t("me_showPreview")}
         </button>
         {previewOpen && (
           <div className="mt-5 flex flex-col items-center gap-3">
             <p className="text-[10px] font-mono uppercase tracking-widest text-emerald-400">
-              Live preview · updates as you edit
+              {t("me_livePreview")}
             </p>
             {preview}
           </div>
@@ -92,16 +94,16 @@ export default function MenuEditorPage() {
                   )}
                 >
                   <tab.icon className="w-3.5 h-3.5" />
-                  {tab.label}
+                  {t(tab.labelKey)}
                 </button>
               );
             })}
           </div>
 
-          {active === "business" && <StepBusiness headingEyebrow="Owner · Identity" />}
-          {active === "branding" && <StepBranding headingEyebrow="Owner · Look & Feel" />}
-          {active === "categories" && <StepCategories headingEyebrow="Owner · Categories" />}
-          {active === "products" && <StepProducts headingEyebrow="Owner · Products" />}
+          {active === "business" && <StepBusiness headingEyebrow={t("me_eyebrowId")} />}
+          {active === "branding" && <StepBranding headingEyebrow={t("me_eyebrowFF")} />}
+          {active === "categories" && <StepCategories headingEyebrow={t("me_eyebrowCats")} />}
+          {active === "products" && <StepProducts headingEyebrow={t("me_eyebrowProds")} />}
         </div>
 
         {/* Desktop: sticky live preview */}
@@ -110,7 +112,7 @@ export default function MenuEditorPage() {
             <div className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <p className="text-[10px] font-mono uppercase tracking-widest text-white/40">
-                Live phone preview · updates as you edit
+                {t("me_livePreviewDesktop")}
               </p>
             </div>
             {preview}

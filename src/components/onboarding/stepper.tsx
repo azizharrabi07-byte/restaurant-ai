@@ -1,43 +1,46 @@
+"use client";
+
 import { Building2, Palette, FolderTree, Utensils, Smartphone, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export interface StepDefinition {
   step: number;
-  title: string;
-  shortTitle: string;
-  description: string;
+  titleKey: string;
+  shortKey: string;
+  descriptionKey: string;
 }
 
 export const STEPS: StepDefinition[] = [
   {
     step: 1,
-    title: "Business Identity",
-    shortTitle: "Identity",
-    description: "Name & brand emblem",
+    titleKey: "ob_stp1t",
+    shortKey: "ob_stp1",
+    descriptionKey: "ob_stp1d",
   },
   {
     step: 2,
-    title: "Branding & Ambience",
-    shortTitle: "Branding",
-    description: "Palette, hero cover & vibes",
+    titleKey: "ob_stp2t",
+    shortKey: "ob_stp2",
+    descriptionKey: "ob_stp2d",
   },
   {
     step: 3,
-    title: "Menu Categories",
-    shortTitle: "Categories",
-    description: "Organize menus & sections",
+    titleKey: "ob_stp3t",
+    shortKey: "ob_stp3",
+    descriptionKey: "ob_stp3d",
   },
   {
     step: 4,
-    title: "Dishes & Products",
-    shortTitle: "Products",
-    description: "Items, prices, tags & images",
+    titleKey: "ob_stp4t",
+    shortKey: "ob_stp4",
+    descriptionKey: "ob_stp4d",
   },
   {
     step: 5,
-    title: "Live Customer Preview",
-    shortTitle: "Live Preview",
-    description: "Interactive mobile phone QR menu",
+    titleKey: "ob_stp5t",
+    shortKey: "ob_stp5",
+    descriptionKey: "ob_stp5d",
   },
 ];
 
@@ -47,6 +50,7 @@ interface StepperProps {
 }
 
 export function Stepper({ currentStep, onSelectStep }: StepperProps) {
+  const { t } = useI18n();
   const getStepIcon = (step: number, isCompleted: boolean) => {
     if (isCompleted) {
       return <Check className="w-4 h-4 text-white stroke-[2.5]" />;
@@ -70,7 +74,7 @@ export function Stepper({ currentStep, onSelectStep }: StepperProps) {
   return (
     <div className="w-full border-b border-white/10 bg-[#080808]">
       <div className="max-w-7xl mx-auto px-4 sm:px-8">
-        <nav aria-label="Onboarding Progress" className="overflow-x-auto no-scrollbar py-4">
+        <nav aria-label={t("ob_progress")} className="overflow-x-auto no-scrollbar py-4">
           <ol className="flex items-center min-w-max md:min-w-0 md:grid md:grid-cols-5 gap-2 sm:gap-4">
             {STEPS.map((s, idx) => {
               const isActive = currentStep === s.step;
@@ -118,7 +122,7 @@ export function Stepper({ currentStep, onSelectStep }: StepperProps) {
                               : "text-white/40 font-medium group-hover:text-white/60",
                         )}
                       >
-                        {s.shortTitle}
+                        {t(s.shortKey)}
                       </span>
                     </div>
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { useOrders } from "@/lib/use-orders";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { OrderStatus } from "@/lib/constants";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -11,15 +12,16 @@ import { OrderStatusPill } from "@/components/dashboard/orders-status-pill";
 
 type Filter = "all" | OrderStatus;
 
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "pending", label: "Pending" },
-  { key: "accepted", label: "Accepted" },
-  { key: "paid", label: "Paid" },
+const FILTERS: { key: Filter; labelKey: string }[] = [
+  { key: "all", labelKey: "common_all" },
+  { key: "pending", labelKey: "status_pending" },
+  { key: "accepted", labelKey: "status_accepted" },
+  { key: "paid", labelKey: "status_paid" },
 ];
 
 export default function OrdersPage() {
   const { orders, acceptOrder, markOrderPaid, live } = useOrders();
+  const { t } = useI18n();
   const [filter, setFilter] = useState<Filter>("all");
 
   const sorted = [...orders].sort((a, b) => b.number - a.number);
@@ -35,20 +37,20 @@ export default function OrdersPage() {
 
   const handleAccept = (id: string) => {
     acceptOrder(id);
-    toast.success("Order accepted", { description: "The kitchen is on it." });
+    toast.success(t("ord_acceptToast"), { description: t("ord_acceptToastDesc") });
   };
 
   const handlePaid = (id: string) => {
     markOrderPaid(id);
-    toast.success("Order marked as paid", { description: "Another one settled." });
+    toast.success(t("ord_paidToast"), { description: t("ord_paidToastDesc") });
   };
 
   return (
     <>
       <PageHeader
-        eyebrow="Owner · Orders"
-        title="Live orders"
-        description="Track every order coming in today — accept and settle them as they move through service."
+        eyebrow={t("ord_eyebrow")}
+        title={t("ord_title")}
+        description={t("ord_desc")}
       />
 
       <div className="flex items-center gap-1.5 flex-wrap mb-6">
@@ -64,7 +66,7 @@ export default function OrdersPage() {
                 : "text-white/50 border border-white/10 hover:text-white hover:bg-white/5",
             )}
           >
-            {f.label}
+            {t(f.labelKey)}
             <span className={cn("ml-1.5 font-mono", filter === f.key ? "text-black/60" : "text-white/40")}>
               {counts[f.key]}
             </span>
@@ -75,11 +77,9 @@ export default function OrdersPage() {
 
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-white/10 bg-[#0D0D0D] py-20 text-center">
-          <p className="text-sm text-white/60 font-medium">No orders here</p>
+          <p className="text-sm text-white/60 font-medium">{t("ord_emptyTitle")}</p>
           <p className="text-xs text-white/40 mt-1">
-            {live
-              ? "Orders will appear the moment customers scan and place them."
-              : "Demo data shown. Save your menu once and live orders from guest scans appear here."}
+            {live ? t("ord_emptyLive") : t("ord_emptyDemo")}
           </p>
         </div>
       ) : (

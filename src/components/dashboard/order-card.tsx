@@ -1,6 +1,6 @@
 import type { Order } from "@/lib/constants";
-import { formatDT } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { Button } from "@/components/ui/button";
 import { Check, Sparkles } from "lucide-react";
@@ -13,6 +13,7 @@ interface OrderCardProps {
 }
 
 export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps) {
+  const { t, plural, formatPrice } = useI18n();
   const totalQty = order.items.reduce((sum, i) => sum + i.qty, 0);
 
   return (
@@ -25,7 +26,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex flex-col items-center justify-center rounded-lg border border-white/10 bg-[#111111] min-w-[46px] px-2 py-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-wider text-white/40">Table</span>
+            <span className="text-[9px] font-mono uppercase tracking-wider text-white/40">{t("oc_table")}</span>
             <span className="text-base font-bold text-white font-mono leading-tight">
               {String(order.table).padStart(2, "0")}
             </span>
@@ -46,7 +47,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               {item.name}
             </span>
             <span className="text-white/50 font-mono shrink-0">
-              {formatDT(item.qty * item.price)}
+              {formatPrice(item.qty * item.price)}
             </span>
           </div>
         ))}
@@ -54,10 +55,10 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
 
       <div className="flex items-center justify-between border-t border-white/5 pt-3">
         <span className="text-[10px] uppercase tracking-widest text-white/40 font-mono">
-          {totalQty} {totalQty === 1 ? "item" : "items"}
+          {plural(totalQty, "common_items_one", "common_items_other")}
         </span>
         <span className="font-serif italic text-base text-white tracking-tight">
-          {formatDT(order.total)}
+          {formatPrice(order.total)}
         </span>
       </div>
 
@@ -71,7 +72,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               onClick={() => onAccept(order.id)}
             >
               <Sparkles className="w-3.5 h-3.5 text-black" />
-              Accept Order
+              {t("oc_accept")}
             </Button>
           )}
           {order.status === "accepted" && onPaid && (
@@ -83,12 +84,12 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               onClick={() => onPaid(order.id)}
             >
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              Mark as Paid
+              {t("oc_markPaid")}
             </Button>
           )}
           {order.status === "paid" && (
             <span className="flex-1 text-center text-[11px] font-mono text-emerald-400/80 uppercase tracking-wider">
-              Completed
+              {t("status_paid")}
             </span>
           )}
         </div>

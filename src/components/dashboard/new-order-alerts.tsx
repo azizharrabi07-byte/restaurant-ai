@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import type { Order } from "@/lib/constants";
+import { useI18n } from "@/lib/i18n";
 
 function playChime() {
   try {
@@ -42,6 +43,7 @@ interface NewOrderAlertsProps {
  */
 export function NewOrderAlerts({ orders, venue }: NewOrderAlertsProps) {
   const seen = useRef<Set<string> | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (seen.current === null) {
@@ -61,10 +63,10 @@ export function NewOrderAlerts({ orders, venue }: NewOrderAlertsProps) {
       const items = o.items
         .map((i) => `${i.qty}× ${i.name}`)
         .join(", ");
-      toast(`New order #${o.number}`, {
-        description: `Table ${String(o.table).padStart(2, "0")} · ${items}`,
+      toast(t("na_newOrder", { n: o.number }), {
+        description: t("na_desc", { t: String(o.table).padStart(2, "0"), items }),
         action: {
-          label: "View",
+          label: t("na_view"),
           onClick: () => {
             window.location.href = "/worker/dashboard";
           },
@@ -77,12 +79,12 @@ export function NewOrderAlerts({ orders, venue }: NewOrderAlertsProps) {
       ) {
         try {
           new Notification(
-            venue ? `New order at ${venue}` : "New order",
+            venue ? t("na_venue", { venue }) : t("na_new"),
             {
-              body: `Order #${o.number} · Table ${String(o.table).padStart(
-                2,
-                "0",
-              )}`,
+              body: t("na_body", {
+                n: o.number,
+                t: String(o.table).padStart(2, "0"),
+              }),
             },
           );
         } catch {
@@ -90,7 +92,7 @@ export function NewOrderAlerts({ orders, venue }: NewOrderAlertsProps) {
         }
       }
     });
-  }, [orders, venue]);
+  }, [orders, venue, t]);
 
   return null;
 }

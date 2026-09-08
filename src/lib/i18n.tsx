@@ -1,0 +1,1105 @@
+"use client";
+
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+
+export type AppLang = "en" | "fr" | "ar";
+export type AppCurrency = "tnd" | "usd" | "eur";
+
+export const APP_LANGS: { key: AppLang; label: string }[] = [
+  { key: "en", label: "EN" },
+  { key: "fr", label: "FR" },
+  { key: "ar", label: "AR" },
+];
+
+export const APP_CURRENCIES: { key: AppCurrency; label: string; symbol: string }[] = [
+  { key: "tnd", label: "TND", symbol: "DT" },
+  { key: "usd", label: "USD", symbol: "$" },
+  { key: "eur", label: "EUR", symbol: "€" },
+];
+
+const copy: Record<AppLang, Record<string, string>> = {
+  en: {
+    // Landing
+    nav_open: "Open the Platform",
+    hero_badge: "QR menu & table ordering for restaurants",
+    hero_title_a: "Your menu, on",
+    hero_title_b: "every phone.",
+    hero_sub:
+      "Sufra turns your menu into a digital experience — guests scan a QR on their table, browse, and order straight to your dashboard.",
+    b1: "No app for guests — it runs in the browser",
+    b2: "Orders reach you live, in real time",
+    b3: "Set up in minutes, styled like your brand",
+    cta: "Start Free Setup",
+    how_link: "See how it works",
+    how_eyebrow: "How it works",
+    how_title: "From table scan to served — in three steps.",
+    h1_t: "Build your menu",
+    h1_d:
+      "Add categories, items and prices in a live builder — colours, logo and layout theme included. Watch the guest preview update as you type.",
+    h2_t: "Print table codes",
+    h2_d:
+      "Generate a unique QR code for every table in one tap. Each code opens that table's menu — no app for your guests to install.",
+    h3_t: "Serve live orders",
+    h3_d:
+      "Guests tap to order and it lands on your dashboard instantly. Accept, update and mark paid from your phone or tablet.",
+    f_eyebrow: "Features",
+    f_title: "Everything you need to take orders.",
+    f1_t: "Instant QR Menus",
+    f1_d: "Every table gets its own code. Guests scan, browse and order — no app required.",
+    f2_t: "Menu Themes",
+    f2_d: "Classic, minimal, vibrant or gallery — pick a layout that matches your venue and your brand.",
+    f3_t: "Real-Time Orders",
+    f3_d: "Orders appear on the dashboard the second a guest checks out. One tap to accept.",
+    f4_t: "Live Phone Preview",
+    f4_d: "See exactly what your guests see — menu, prices and hand-off screen — while you edit.",
+    f5_t: "Two-Minute Setup",
+    f5_d: "No hardware, no printing service, no onboarding calls. Your menu can be live today.",
+    f6_t: "Built for Restaurants",
+    f6_d: "Categories, pricing, tables and staff roles — designed around how food businesses actually work.",
+    cta_eyebrow: "Ready when you are",
+    cta_title: "Ask your first guest to scan a code tonight.",
+    cta_sub:
+      "Build your menu, generate your table codes, and start taking orders — all from the owner platform, no technical setup.",
+    cta_note: "No credit card · 2 minutes",
+    foot_rights: "© {year} Sufra",
+    foot_made: "Made for restaurants in Tunisia",
+    cur_label: "Currency",
+    lang_label: "Language",
+
+    // Common
+    common_all: "All",
+    common_copy: "Copy",
+    common_items_one: "1 item",
+    common_items_other: "{n} items",
+
+    // Statuses
+    status_pending: "Pending",
+    status_accepted: "Accepted",
+    status_paid: "Paid",
+    status_completed: "Completed",
+    status_active: "Active",
+
+    // Guest menu
+    g_dinein: "Dine-in · Table {t}",
+    g_open: "Open now",
+    g_all: "All ({n})",
+    g_add: "Add",
+    g_search: "Search dishes, drinks...",
+    g_noItems: "No menu items found",
+    g_confirmTitle: "Order #{n}",
+    g_confirmBody:
+      "Your order for {total} is with the kitchen. Pay at the counter when it arrives — we'll call your table.",
+    g_backMenu: "Back to menu",
+    g_cartTitle: "Your order",
+    g_cartDesc: "Review your items, then send the order to the kitchen.",
+    g_cartTotal: "Total",
+    g_cartSend: "Send Order to Kitchen",
+    g_cartPaynote: "You'll pay at the counter once your order is ready.",
+    g_counterError: "Ordering isn't live yet on this device. Please order at the counter.",
+    g_networkError: "Could not reach the kitchen. Please order at the counter.",
+    g_notliveTitle: "This menu isn't live yet",
+    g_notliveDesc:
+      "The owner hasn't published their menu yet. Please ask for a printed menu or order at the counter.",
+    g_type: "Café & Kitchen",
+    g_scan: "Scan to order",
+    g_dineDemo: "Table 04 · Dine-In",
+    g_viewport: "Customer Mobile Viewport (375 × 667)",
+    g_addPrompt: "Try adjusting your search terms",
+    g_addStep4: "Add products in Step 4 to populate your menu",
+
+    // Owner nav / chrome
+    nav_overview: "Overview",
+    nav_orders: "Orders",
+    nav_tables: "Tables & QR",
+    nav_workers: "Workers",
+    nav_menu: "Menu",
+    nav_settings: "Settings",
+    owner_dashboard: "Owner Dashboard",
+    owner_editMenu: "Edit Menu",
+
+    // Save status
+    save_local: "Saved locally",
+    save_saving: "Saving…",
+    save_saved: "All changes saved",
+    save_sync: "Cloud sync on",
+    save_failed: "Sync failed",
+
+    // Overview
+    ov_eyebrow: "Overview",
+    ov_today: "Today",
+    ov_title: "Today at a glance",
+    ov_desc:
+      "A live snapshot of your service — revenue, orders, and what guests are loving right now.",
+    ov_viewAll: "View all orders",
+    ov_revenue: "Today's Revenue",
+    ov_totalOrders: "Total Orders",
+    ov_awaiting: "awaiting action",
+    ov_inKitchen: "in the kitchen",
+    ov_completed: "completed",
+    ov_avgOrder: "Avg. Order Value",
+    ov_perPaid: "per paid order",
+    ov_paidSub_one: "one paid order",
+    ov_paidSub_other: "{n} paid orders",
+    ov_revByHour: "Revenue by hour",
+    ov_revByHourSub: "What each hour generated so far",
+    ov_ordersByHour: "Orders by hour",
+    ov_peak: "Peak: {hour} · {count} orders",
+    ov_noOrdersToday: "No orders yet today",
+    ov_bestSellers: "Best-selling products",
+    ov_noSales: "No sales yet — charts fill in as guests order",
+    ov_sold_one: "{n} sold",
+    ov_sold_other: "{n} sold",
+    ov_recentOrders: "Recent orders",
+    ov_seeAll: "See all",
+    ov_noOrdersYet: "No orders yet — the first guest scan will land here",
+
+    // Orders page
+    ord_eyebrow: "Owner · Orders",
+    ord_title: "Live orders",
+    ord_desc:
+      "Track every order coming in today — accept and settle them as they move through service.",
+    ord_acceptToast: "Order accepted",
+    ord_acceptToastDesc: "The kitchen is on it.",
+    ord_paidToast: "Order marked as paid",
+    ord_paidToastDesc: "Another one settled.",
+    ord_emptyTitle: "No orders here",
+    ord_emptyLive: "Orders will appear the moment customers scan and place them.",
+    ord_emptyDemo:
+      "Demo data shown. Save your menu once and live orders from guest scans appear here.",
+
+    // Order card
+    oc_table: "Table",
+    oc_accept: "Accept Order",
+    oc_markPaid: "Mark as Paid",
+
+    // Worker terminal
+    w_terminal: "Worker Terminal",
+    w_cashier: "Cashier",
+    w_orders_one: "{n} new order",
+    w_orders_other: "{n} new orders",
+    w_dashboardEyebrow: "Cashier Terminal",
+    w_desc: "Every scan from {venue} lands here. Move them along: accept, then settle.",
+    w_colPending: "New Orders",
+    w_hintPending: "Accept when the kitchen starts on it",
+    w_hintAccepted: "Being prepared — settle when paid",
+    w_hintPaid: "Completed and settled",
+    w_empty: "Nothing here yet",
+    w_acceptDesc: "Pushed to the kitchen flow.",
+    w_paidToast: "Marked as paid",
+    w_paidDesc: "Cheque closed. On to the next.",
+
+    // Worker invite
+    inv_header: "Worker Invite",
+    inv_loading: "Loading invite…",
+    inv_notFound: "Invite not found",
+    inv_notFoundDesc:
+      "This invite link is expired, was already used, or doesn't exist. Ask the owner to generate a new one.",
+    inv_backHome: "Back to Sufra",
+    inv_welcome: "You're in — welcome to {name}",
+    inv_ready: "{role} account ready. Opening your terminal…",
+    inv_invitedTo: "You've been invited to join",
+    inv_roleManager: "You'll get full oversight of tables, workers, and live orders.",
+    inv_roleCashier: "You'll take orders at the register and settle them from the terminal.",
+    inv_expires24: "In 24 hours",
+    inv_name: "Your name",
+    inv_namePh: "e.g. Yassine",
+    inv_accept: "Accept Invite",
+    inv_noAcc: "No account needed — you'll land straight in the cashier terminal.",
+    inv_welcomeToast: "Welcome aboard!",
+    inv_welcomeToastDesc: "You joined {name} as {role}.",
+    inv_dlgTitle: "Invite a worker",
+    inv_dlgDesc: "Choose a role, then we'll generate a private invite QR for them.",
+    inv_roleCashierHint: "Handles the register and accepts orders in the terminal.",
+    inv_roleManagerHint: "Full oversight of tables, workers, and live orders.",
+    inv_generate: "Generate Invite",
+    inv_expiresAuto: "Expires automatically in 24 hours",
+    inv_readyTitle: "Invite ready",
+    inv_readyDesc: "Share this link — or let them scan the QR to accept as {role}.",
+    inv_linkLabel: "Invite link",
+    inv_expires24Short: "{role} · expires in 24 hours",
+    inv_awaiting: "Awaiting accept",
+    inv_createAnother: "Create another invite",
+
+    // Workers page
+    wk_eyebrow: "Owner · Workers",
+    wk_title: "Your team",
+    wk_desc:
+      "Cashiers and managers, each with their own terminal. Invite someone and they'll accept via QR.",
+    wk_invite: "Invite Worker",
+    wk_active: "Active workers · {n}",
+    wk_joined: "Joined {date}",
+    wk_statusActive: "Active",
+    wk_statusPending: "Pending",
+    wk_copy: "Copy",
+    wk_invites: "Pending invites · {n}",
+    wk_valid24: "Valid 24 hours",
+    wk_noInvites: "No pending invites",
+    wk_noInvitesSub: "Hit “Invite Worker” to generate a scannable invite link.",
+    wk_inviteFor: "{role} invite",
+    wk_copyTitle: "Copy invite link",
+    wk_removeTitle: "Remove invite",
+    wk_removedToast: "Invite removed",
+
+    // New order alerts
+    na_newOrder: "New order #{n}",
+    na_desc: "Table {t} · {items}",
+    na_view: "View",
+    na_new: "New order",
+    na_venue: "New order at {venue}",
+    na_body: "Order #{n} · Table {t}",
+
+    wd_newOrders: "New Orders",
+    wd_pendingHint: "Accept when the kitchen starts on it",
+    wd_acceptedHint: "Being prepared — settle when paid",
+    wd_paidHint: "Completed and settled",
+    wd_acceptToast: "Order accepted",
+    wd_acceptToastDesc: "Pushed to the kitchen flow.",
+    wd_paidToast: "Marked as paid",
+    wd_paidToastDesc: "Cheque closed. On to the next.",
+    wd_desc: "Every scan from {venue} lands here. Move them along: accept, then settle.",
+    wd_nothing: "Nothing here yet",
+
+    // Tables
+    tb_eyebrow: "Owner · Tables & QR",
+    tb_title: "Tables & QR codes",
+    tb_desc:
+      "Generate a unique menu QR code for every table. Guests scan, browse, and order from their phone.",
+    tb_tablesLabel: "Tables",
+    tb_tableLabel: "Table",
+    tb_generate: "Generate Tables",
+    tb_downloadAll: "Download All",
+    tb_print: "Print QR Codes",
+    tb_generated_one: "1 table created",
+    tb_generated_other: "{n} tables created",
+    tb_generatedDesc: "Each table now has its own unique QR code.",
+    tb_downloading_one: "Downloading QR code",
+    tb_downloading_other: "Downloading {n} QR codes",
+    tb_downloadingDesc: "Check your downloads folder.",
+    tb_noTables: "No tables yet",
+    tb_noTablesDesc:
+      "Pick a number above and hit Generate Tables to create your printable QR codes.",
+    tb_menuUrl: "Menu URL",
+    tb_downloadQr: "Download QR",
+    tb_linked: "Linked to your brand",
+    tb_printHeader: "{name} · Table {t}",
+
+    // Settings
+    st_eyebrow: "Owner · Settings",
+    st_title: "Restaurant settings",
+    st_desc:
+      "Your branding, menu, and data — everything the operations side of the house knows about you.",
+    st_branding: "Branding",
+    st_accent: "Accent",
+    st_sections: "Sections",
+    st_products: "Products",
+    st_ops: "Ops",
+    st_opsValue: "{tables} tables · {workers} staff",
+    st_editAll: "Edit Menu & Branding",
+    st_cloudSync: "Cloud sync",
+    st_cloudSyncDesc:
+      "Your menu autosaves to Supabase the moment you start editing — scan a table QR on any phone to see it live. Orders placed by guests arrive here in real time.",
+    st_data: "Data",
+    st_loadSample: "Load Sample Data",
+    st_loadSampleToast: "Sample café data loaded",
+    st_loadSampleToastDesc: "Menu and operations reset to the demo café.",
+    st_reset: "Reset Everything",
+    st_resetToast: "State reset",
+    st_cover: "Menu hero cover",
+
+    // Menu editor
+    me_eyebrow: "Owner · Menu Editor",
+    me_title: "Menu & branding",
+    me_desc:
+      "Everything guests see when they scan your QR code. Changes autosave as you edit.",
+    me_tabIdentity: "Identity",
+    me_tabFF: "Look & Feel",
+    me_tabCategories: "Categories",
+    me_tabProducts: "Products",
+    me_hidePreview: "Hide phone preview",
+    me_showPreview: "Show phone preview",
+    me_livePreview: "Live preview · updates as you edit",
+    me_livePreviewDesktop: "Live phone preview · updates as you edit",
+    me_eyebrowId: "Owner · Identity",
+    me_eyebrowFF: "Owner · Look & Feel",
+    me_eyebrowCats: "Owner · Categories",
+    me_eyebrowProds: "Owner · Products",
+
+    // Onboarding chrome
+    ob_partner: "Partner Portal",
+    ob_restaurant: "Restaurant",
+    ob_yourCafe: "Your Café",
+    ob_demoData: "Demo Data",
+    ob_resetTitle: "Reset to sample cafe data",
+    ob_hidePreview: "Hide Preview",
+    ob_sidePreview: "Side Preview",
+    ob_publish: "Publish",
+    ob_next: "Next: {name}",
+    ob_back: "Back",
+    ob_continue: "Continue",
+    ob_syncing: "Syncing live",
+    ob_fullPreview: "Open full preview",
+    ob_progress: "Onboarding Progress",
+    ob_stp1: "Identity",
+    ob_stp2: "Branding",
+    ob_stp3: "Categories",
+    ob_stp4: "Products",
+    ob_stp5: "Live Preview",
+    ob_stp1t: "Business Identity",
+    ob_stp1d: "Name & brand emblem",
+    ob_stp2t: "Branding & Ambience",
+    ob_stp2d: "Palette, hero cover & vibes",
+    ob_stp3t: "Menu Categories",
+    ob_stp3d: "Organize menus & sections",
+    ob_stp4t: "Dishes & Products",
+    ob_stp4d: "Items, prices, tags & images",
+    ob_stp5t: "Live Customer Preview",
+    ob_stp5d: "Interactive mobile phone QR menu",
+  },
+
+  fr: {
+    nav_open: "Ouvrir la Plateforme",
+    hero_badge: "Menu QR et commandes à table pour restaurants",
+    hero_title_a: "Votre menu, sur",
+    hero_title_b: "tous les téléphones.",
+    hero_sub:
+      "Sufra transforme votre menu en expérience digitale — vos clients scannent un QR à leur table, parcourent, et commandent directement sur votre tableau de bord.",
+    b1: "Aucune appli pour vos clients — tout se passe dans le navigateur",
+    b2: "Les commandes arrivent en temps réel",
+    b3: "Configuré en quelques minutes, à votre image",
+    cta: "Commencer gratuitement",
+    how_link: "Découvrir le fonctionnement",
+    how_eyebrow: "Comment ça marche",
+    how_title: "Du scan à la table servie — en trois étapes.",
+    h1_t: "Créez votre menu",
+    h1_d:
+      "Ajoutez catégories, articles et prix dans un éditeur en direct — couleurs, logo et thème inclus. Votre aperçu client se met à jour pendant que vous tapez.",
+    h2_t: "Imprimez vos codes",
+    h2_d:
+      "Générez un QR code unique pour chaque table en un clic. Chaque code ouvre le menu de cette table — aucune installation pour vos clients.",
+    h3_t: "Servez en direct",
+    h3_d:
+      "Dès qu'un client commande, ça apparaît sur votre tableau de bord. Acceptez, modifiez et encaissez depuis votre téléphone ou tablette.",
+    f_eyebrow: "Fonctionnalités",
+    f_title: "Tout ce qu'il faut pour prendre les commandes.",
+    f1_t: "Menus QR instantanés",
+    f1_d: "Chaque table a son code. Vos clients scannent, découvrent et commandent — sans appli.",
+    f2_t: "Thèmes de menu",
+    f2_d: "Classique, minimal, vibrant ou galerie — un rendu qui colle à votre établissement et à votre marque.",
+    f3_t: "Commandes en temps réel",
+    f3_d: "Les commandes arrivent sur le tableau de bord dès la validation. Un clic pour accepter.",
+    f4_t: "Aperçu téléphone en direct",
+    f4_d: "Voyez exactement ce que voient vos clients — menu, prix et écran de confirmation — pendant que vous modifiez.",
+    f5_t: "Installation en 2 minutes",
+    f5_d: "Pas de matériel, pas de service d'impression, pas d'appel d'onboarding. Votre menu peut être en ligne aujourd'hui.",
+    f6_t: "Pensé pour les restaurants",
+    f6_d: "Catégories, prix, tables et rôles du personnel — conçu autour de la façon dont travaillent vraiment les établissements.",
+    cta_eyebrow: "Prêt quand vous l'êtes",
+    cta_title: "Demandez à votre premier client de scanner ce soir.",
+    cta_sub:
+      "Créez votre menu, générez vos codes de table, et commencez à prendre des commandes — tout depuis la plateforme propriétaire.",
+    cta_note: "Sans carte bancaire · 2 minutes",
+    foot_rights: "© {year} Sufra",
+    foot_made: "Conçu pour les restaurants en Tunisie",
+    cur_label: "Devise",
+    lang_label: "Langue",
+
+    common_all: "Tout",
+    common_copy: "Copier",
+    common_items_one: "1 article",
+    common_items_other: "{n} articles",
+
+    status_pending: "En attente",
+    status_accepted: "Acceptée",
+    status_paid: "Payée",
+    status_completed: "Terminée",
+    status_active: "Actif",
+
+    g_dinein: "Sur place · Table {t}",
+    g_open: "Ouvert",
+    g_all: "Tout ({n})",
+    g_add: "Ajouter",
+    g_search: "Rechercher plats, boissons...",
+    g_noItems: "Aucun article trouvé",
+    g_confirmTitle: "Commande #{n}",
+    g_confirmBody:
+      "Votre commande de {total} est en cuisine. Payez au comptoir à l'arrivée — nous appellerons votre table.",
+    g_backMenu: "Retour au menu",
+    g_cartTitle: "Votre commande",
+    g_cartDesc: "Vérifiez vos articles, puis envoyez la commande à la cuisine.",
+    g_cartTotal: "Total",
+    g_cartSend: "Envoyer la commande à la cuisine",
+    g_cartPaynote: "Vous paierez au comptoir une fois votre commande prête.",
+    g_counterError: "La commande n'est pas encore active sur cet appareil. Merci de commander au comptoir.",
+    g_networkError: "Impossible de joindre la cuisine. Merci de commander au comptoir.",
+    g_notliveTitle: "Ce menu n'est pas encore en ligne",
+    g_notliveDesc:
+      "Le propriétaire n'a pas encore publié son menu. Demandez la carte papier ou commandez au comptoir.",
+    g_type: "Café & Cuisine",
+    g_scan: "Scanner pour commander",
+    g_dineDemo: "Table 04 · Sur place",
+    g_viewport: "Aperçu mobile client (375 × 667)",
+    g_addPrompt: "Essayez d'autres termes de recherche",
+    g_addStep4: "Ajoutez des produits à l'étape 4 pour remplir votre menu",
+
+    nav_overview: "Vue d'ensemble",
+    nav_orders: "Commandes",
+    nav_tables: "Tables & QR",
+    nav_workers: "Employés",
+    nav_menu: "Menu",
+    nav_settings: "Paramètres",
+    owner_dashboard: "Tableau de bord propriétaire",
+    owner_editMenu: "Modifier le menu",
+
+    save_local: "Enregistré localement",
+    save_saving: "Enregistrement…",
+    save_saved: "Tout est enregistré",
+    save_sync: "Synchronisation cloud activée",
+    save_failed: "Échec de synchronisation",
+
+    ov_eyebrow: "Vue d'ensemble",
+    ov_today: "Aujourd'hui",
+    ov_title: "Aujourd'hui en un coup d'œil",
+    ov_desc:
+      "Un aperçu en direct de votre service — revenus, commandes et ce que vos clients adorent en ce moment.",
+    ov_viewAll: "Voir toutes les commandes",
+    ov_revenue: "Revenus du jour",
+    ov_totalOrders: "Total des commandes",
+    ov_awaiting: "en attente",
+    ov_inKitchen: "en cuisine",
+    ov_completed: "terminées",
+    ov_avgOrder: "Prix moyen / commande",
+    ov_perPaid: "par commande payée",
+    ov_paidSub_one: "une commande payée",
+    ov_paidSub_other: "{n} commandes payées",
+    ov_revByHour: "Revenus par heure",
+    ov_revByHourSub: "Ce que chaque heure a généré jusqu'ici",
+    ov_ordersByHour: "Commandes par heure",
+    ov_peak: "Pic : {hour} · {count} commandes",
+    ov_noOrdersToday: "Aucune commande aujourd'hui",
+    ov_bestSellers: "Produits les plus vendus",
+    ov_noSales: "Pas encore de ventes — les graphiques se remplissent au fil des commandes",
+    ov_sold_one: "{n} vendu",
+    ov_sold_other: "{n} vendus",
+    ov_recentOrders: "Commandes récentes",
+    ov_seeAll: "Tout voir",
+    ov_noOrdersYet: "Aucune commande encore — le premier scan d'un client apparaîtra ici",
+
+    ord_eyebrow: "Propriétaire · Commandes",
+    ord_title: "Commandes en direct",
+    ord_desc:
+      "Suivez chaque commande du jour — acceptez et encaissez au fil du service.",
+    ord_acceptToast: "Commande acceptée",
+    ord_acceptToastDesc: "La cuisine s'en occupe.",
+    ord_paidToast: "Commande marquée payée",
+    ord_paidToastDesc: "Encore une de réglée.",
+    ord_emptyTitle: "Aucune commande ici",
+    ord_emptyLive: "Les commandes apparaîtront dès qu'un client scannera et commandera.",
+    ord_emptyDemo:
+      "Données de démo affichées. Enregistrez votre menu et les commandes en direct apparaîtront ici.",
+
+    oc_table: "Table",
+    oc_accept: "Accepter la commande",
+    oc_markPaid: "Marquer payé",
+
+    w_terminal: "Terminal employé",
+    w_cashier: "Caissier",
+    w_orders_one: "{n} nouvelle commande",
+    w_orders_other: "{n} nouvelles commandes",
+    w_dashboardEyebrow: "Terminal caissier",
+    w_desc: "Chaque scan de {venue} apparaît ici. Faites avancer : acceptez, puis encaissez.",
+    w_colPending: "Nouvelles commandes",
+    w_hintPending: "À accepter quand la cuisine commence",
+    w_hintAccepted: "En préparation — encaissez au paiement",
+    w_hintPaid: "Terminée et réglée",
+    w_empty: "Rien pour l'instant",
+    w_acceptDesc: "Transmise à la cuisine.",
+    w_paidToast: "Marquée payée",
+    w_paidDesc: "Addition réglée. À la suivante.",
+
+    inv_header: "Invitation employé",
+    inv_loading: "Chargement de l'invitation…",
+    inv_notFound: "Invitation introuvable",
+    inv_notFoundDesc:
+      "Ce lien a expiré, a déjà été utilisé ou n'existe pas. Demandez au propriétaire d'en générer un nouveau.",
+    inv_backHome: "Retour à Sufra",
+    inv_welcome: "Vous y êtes — bienvenue chez {name}",
+    inv_ready: "Compte {role} prêt. Ouverture de votre terminal…",
+    inv_invitedTo: "Vous avez été invité à rejoindre",
+    inv_roleManager: "Vous aurez la supervision complète des tables, des employés et des commandes en direct.",
+    inv_roleCashier: "Vous prendrez les commandes en caisse et les encaisserez depuis le terminal.",
+    inv_expires24: "Dans 24 heures",
+    inv_name: "Votre nom",
+    inv_namePh: "ex. Yassine",
+    inv_accept: "Accepter l'invitation",
+    inv_noAcc: "Aucun compte nécessaire — vous arriverez directement dans le terminal.",
+    inv_welcomeToast: "Bienvenue à bord !",
+    inv_welcomeToastDesc: "Vous avez rejoint {name} en tant que {role}.",
+    inv_dlgTitle: "Inviter un employé",
+    inv_dlgDesc: "Choisissez un rôle, puis nous générerons un QR d'invitation privé.",
+    inv_roleCashierHint: "Gère la caisse et accepte les commandes depuis le terminal.",
+    inv_roleManagerHint: "Supervision complète des tables, des employés et des commandes en direct.",
+    inv_generate: "Générer l'invitation",
+    inv_expiresAuto: "Expire automatiquement dans 24 heures",
+    inv_readyTitle: "Invitation prête",
+    inv_readyDesc: "Partagez ce lien — ou laissez-les scanner le QR pour accepter en tant que {role}.",
+    inv_linkLabel: "Lien d'invitation",
+    inv_expires24Short: "{role} · expire dans 24 heures",
+    inv_awaiting: "En attente d'acceptation",
+    inv_createAnother: "Créer une autre invitation",
+
+    wk_eyebrow: "Propriétaire · Employés",
+    wk_title: "Votre équipe",
+    wk_desc:
+      "Caissiers et gestionnaires, chacun avec son terminal. Invitez quelqu'un et il acceptera via QR.",
+    wk_invite: "Inviter un employé",
+    wk_active: "Employés actifs · {n}",
+    wk_joined: "Membre depuis {date}",
+    wk_statusActive: "Actif",
+    wk_statusPending: "En attente",
+    wk_copy: "Copier",
+    wk_invites: "Invitations en attente · {n}",
+    wk_valid24: "Valide 24 heures",
+    wk_noInvites: "Aucune invitation en attente",
+    wk_noInvitesSub: "Cliquez sur « Inviter un employé » pour générer un lien scannable.",
+    wk_inviteFor: "Invitation {role}",
+    wk_copyTitle: "Copier le lien d'invitation",
+    wk_removeTitle: "Retirer l'invitation",
+    wk_removedToast: "Invitation retirée",
+
+    na_newOrder: "Nouvelle commande #{n}",
+    na_desc: "Table {t} · {items}",
+    na_view: "Voir",
+    na_new: "Nouvelle commande",
+    na_venue: "Nouvelle commande chez {venue}",
+    na_body: "Commande #{n} · Table {t}",
+    wd_newOrders: "Nouvelles commandes",
+    wd_pendingHint: "Acceptez quand la cuisine commence sur la commande",
+    wd_acceptedHint: "En préparation — encaissez au moment du paiement",
+    wd_paidHint: "Terminée et encaissée",
+    wd_acceptToast: "Commande acceptée",
+    wd_acceptToastDesc: "Transmise au flux de la cuisine.",
+    wd_paidToast: "Marquée comme payée",
+    wd_paidToastDesc: "Addition close. Au suivant.",
+    wd_desc: "Chaque scan de {venue} arrive ici. Faites-les avancer : acceptez, puis encaissez.",
+    wd_nothing: "Rien pour l'instant",
+
+    tb_eyebrow: "Propriétaire · Tables & QR",
+    tb_title: "Tables & codes QR",
+    tb_desc:
+      "Générez un QR code unique par table. Les clients scannent, parcourent et commandent depuis leur téléphone.",
+    tb_tablesLabel: "Tables",
+    tb_tableLabel: "Table",
+    tb_generate: "Générer les tables",
+    tb_downloadAll: "Tout télécharger",
+    tb_print: "Imprimer les codes QR",
+    tb_generated_one: "1 table créée",
+    tb_generated_other: "{n} tables créées",
+    tb_generatedDesc: "Chaque table a désormais son propre code QR.",
+    tb_downloading_one: "Téléchargement du QR",
+    tb_downloading_other: "Téléchargement de {n} codes QR",
+    tb_downloadingDesc: "Consultez votre dossier de téléchargements.",
+    tb_noTables: "Aucune table pour l'instant",
+    tb_noTablesDesc:
+      "Choisissez un nombre ci-dessus puis cliquez sur Générer les tables.",
+    tb_menuUrl: "URL du menu",
+    tb_downloadQr: "Télécharger le QR",
+    tb_linked: "Lié à votre marque",
+    tb_printHeader: "{name} · Table {t}",
+
+    st_eyebrow: "Propriétaire · Paramètres",
+    st_title: "Paramètres du restaurant",
+    st_desc:
+      "Votre image, votre menu et vos données — tout ce que la partie opérations connaît de vous.",
+    st_branding: "Image de marque",
+    st_accent: "Accent",
+    st_sections: "Sections",
+    st_products: "Produits",
+    st_ops: "Ops",
+    st_opsValue: "{tables} tables · {workers} employés",
+    st_editAll: "Modifier menu & branding",
+    st_cloudSync: "Synchronisation cloud",
+    st_cloudSyncDesc:
+      "Votre menu se sauvegarde automatiquement dès que vous modifiez — scannez un QR de table depuis n'importe quel téléphone pour le voir en direct. Les commandes arrivent en temps réel.",
+    st_data: "Données",
+    st_loadSample: "Charger les données de démo",
+    st_loadSampleToast: "Données du café de démo chargées",
+    st_loadSampleToastDesc: "Menu et opérations réinitialisés au café de démo.",
+    st_reset: "Tout réinitialiser",
+    st_resetToast: "État réinitialisé",
+    st_cover: "Couverture du menu",
+
+    me_eyebrow: "Propriétaire · Éditeur de menu",
+    me_title: "Menu & branding",
+    me_desc:
+      "Tout ce que vos clients voient en scannant votre QR. Modifications sauvegardées automatiquement.",
+    me_tabIdentity: "Identité",
+    me_tabFF: "Apparence",
+    me_tabCategories: "Catégories",
+    me_tabProducts: "Produits",
+    me_hidePreview: "Masquer l'aperçu",
+    me_showPreview: "Afficher l'aperçu",
+    me_livePreview: "Aperçu en direct · mis à jour pendant la saisie",
+    me_livePreviewDesktop: "Aperçu téléphone en direct · mis à jour pendant la saisie",
+    me_eyebrowId: "Propriétaire · Identité",
+    me_eyebrowFF: "Propriétaire · Apparence",
+    me_eyebrowCats: "Propriétaire · Catégories",
+    me_eyebrowProds: "Propriétaire · Produits",
+
+    ob_partner: "Portail partenaire",
+    ob_restaurant: "Restaurant",
+    ob_yourCafe: "Votre Café",
+    ob_demoData: "Données de démo",
+    ob_resetTitle: "Réinitialiser les données de démo",
+    ob_hidePreview: "Masquer l'aperçu",
+    ob_sidePreview: "Aperçu latéral",
+    ob_publish: "Publier",
+    ob_next: "Suivant : {name}",
+    ob_back: "Retour",
+    ob_continue: "Continuer",
+    ob_syncing: "Synchronisation en direct",
+    ob_fullPreview: "Ouvrir le plein aperçu",
+    ob_progress: "Progression de mise en place",
+    ob_stp1: "Identité",
+    ob_stp2: "Design",
+    ob_stp3: "Catégories",
+    ob_stp4: "Produits",
+    ob_stp5: "Aperçu en direct",
+    ob_stp1t: "Identité du restaurant",
+    ob_stp1d: "Nom & emblème de marque",
+    ob_stp2t: "Image & ambiance",
+    ob_stp2d: "Palette, couverture & ambiance",
+    ob_stp3t: "Catégories du menu",
+    ob_stp3d: "Organisez menus & sections",
+    ob_stp4t: "Plats & produits",
+    ob_stp4d: "Articles, prix, étiquettes & images",
+    ob_stp5t: "Aperçu client en direct",
+    ob_stp5d: "Menu QR téléphone interactif",
+  },
+
+  ar: {
+    nav_open: "افتح المنصة",
+    hero_badge: "منيو QR وطلب من الطاولة للمطاعم",
+    hero_title_a: "منيّوك، على",
+    hero_title_b: "كل هاتف.",
+    hero_sub:
+      "سُفرة تحوّل منيّوك إلى تجربة رقمية — يمسح زبونك الـ QR على طاولته، يتصفّح، ويطلب مباشرةً على لوحة التحكم.",
+    b1: "بدون تطبيق للزبائن — يعمل في المتصفح مباشرة",
+    b2: "الطلبات تصل إليك مباشرةً، لحظة بلحظة",
+    b3: "تجهيز في دقائق، وبأسلوب علامتك التجارية",
+    cta: "ابدأ الإعداد مجاناً",
+    how_link: "شاهد كيف يعمل",
+    how_eyebrow: "كيف يعمل",
+    how_title: "من المسح عند الطاولة إلى التقديم — في ثلاث خطوات.",
+    h1_t: "أنشئ منيّوك",
+    h1_d:
+      "أضف الأصناف والعناصر والأسعار في أداة مباشرة — الألوان والشعار ونمط العرض. شاهد معاينة الزبون تتحدث أثناء الكتابة.",
+    h2_t: "اطبع أكواد الطاولات",
+    h2_d:
+      "ولّد كود QR فريداً لكل طاولة بضغطة واحدة. كل كود يفتح منيو تلك الطاولة — دون أي تثبيت لزبائنك.",
+    h3_t: "استقبل الطلبات فوراً",
+    h3_d:
+      "يلمس الزبون «أطلب» فتبدأ الطلبات على لوحة التحكم. اقبل، حدّث، واعتبر الطلب مدفوعاً من هاتفك أو جهازك اللوحي.",
+    f_eyebrow: "المميزات",
+    f_title: "كل ما تحتاجه لاستقبال الطلبات.",
+    f1_t: "منيو QR فوري",
+    f1_d: "لكل طاولة كود خاص. يمسح الزبون، يتصفّح، ويطلب — بدون أي تطبيق.",
+    f2_t: "أنماط للمنيو",
+    f2_d: "كلاسيكي، بسيط، نابض أو معرض — اختر التصميم الذي يناسب محلك وعلامتك.",
+    f3_t: "طلبات في الوقت الحقيقي",
+    f3_d: "تظهر الطلبات على لوحة التحكم فور إرسالها. قبول بضغطة واحدة.",
+    f4_t: "معاينة جوال حيّة",
+    f4_d: "شاهد تماماً ما يراه زبونك — المنيو والأسعار وشاشة التأكيد — بينما تقوم بالتحرير.",
+    f5_t: "تجهيز في دقيقتين",
+    f5_d: "لا أجهزة، لا خدمة طباعة، لا مكالمات إعداد. يمكن أن يظهر منيّوك اليوم.",
+    f6_t: "مصمَّم للمطاعم",
+    f6_d: "أصناف وأسعار وطاولات وأدوار للموظفين — مصمم حول طريقة عمل المطاعم فعلياً.",
+    cta_eyebrow: "جاهزون متى كنت",
+    cta_title: "اطلب من أول زبون أن يمسح كوداً الليلة.",
+    cta_sub:
+      "أنشئ منيّوك، ولّد أكواد طاولاتك، وابدأ باستقبال الطلبات — كله من منصة المالك وبدون أي إعداد تقني.",
+    cta_note: "بدون بطاقة بنكية · دقيقتان",
+    foot_rights: "© {year} سُفرة",
+    foot_made: "صُنع للمطاعم في تونس",
+    cur_label: "العملة",
+    lang_label: "اللغة",
+
+    common_all: "الكل",
+    common_copy: "نسخ",
+    common_items_one: "عنصر واحد",
+    common_items_other: "{n} عناصر",
+
+    status_pending: "قيد الانتظار",
+    status_accepted: "مقبول",
+    status_paid: "مدفوع",
+    status_completed: "مكتمل",
+    status_active: "نشط",
+
+    g_dinein: "للجلوس · الطاولة {t}",
+    g_open: "مفتوح الآن",
+    g_all: "الكل ({n})",
+    g_add: "أضف",
+    g_search: "ابحث عن أطباق، مشروبات...",
+    g_noItems: "لا توجد عناصر في المنيو",
+    g_confirmTitle: "الطلب #{n}",
+    g_confirmBody:
+      "طلبك بقيمة {total} وصل إلى المطبخ. ادفع عند العداد حين يصبح جاهزاً — سننادي على طاولتك.",
+    g_backMenu: "العودة إلى المنيو",
+    g_cartTitle: "طلبك",
+    g_cartDesc: "راجع عناصرك ثم أرسل الطلب إلى المطبخ.",
+    g_cartTotal: "الإجمالي",
+    g_cartSend: "أرسل الطلب إلى المطبخ",
+    g_cartPaynote: "ستدفع عند العداد عندما يصبح طلبك جاهزاً.",
+    g_counterError: "الطلب غير مفعّل بعد على هذا الجهاز. يرجى الطلب من العداد.",
+    g_networkError: "تعذّر الوصول إلى المطبخ. يرجى الطلب من العداد.",
+    g_notliveTitle: "هذا المنيو غير مفعّل بعد",
+    g_notliveDesc:
+      "المالك لم ينشر منيّوه بعد. اطلب المنيو الورقي أو الطلب من العداد.",
+    g_type: "مقهى ومطبخ",
+    g_scan: "امسح للطلب",
+    g_dineDemo: "الطاولة 04 · جلوس",
+    g_viewport: "معاينة الجوال لدى الزبون (375 × 667)",
+    g_addPrompt: "جرّب تعديل كلمات البحث",
+    g_addStep4: "أضف منتجات في الخطوة 4 لملء منيّوك",
+
+    nav_overview: "نظرة عامة",
+    nav_orders: "الطلبات",
+    nav_tables: "الطاولات والـ QR",
+    nav_workers: "الموظفون",
+    nav_menu: "المنيو",
+    nav_settings: "الإعدادات",
+    owner_dashboard: "لوحة تحكم المالك",
+    owner_editMenu: "تعديل المنيو",
+
+    save_local: "حُفظ محلياً",
+    save_saving: "جارٍ الحفظ…",
+    save_saved: "تم حفظ جميع التغييرات",
+    save_sync: "المزامنة السحابية مفعّلة",
+    save_failed: "فشلت المزامنة",
+
+    ov_eyebrow: "نظرة عامة",
+    ov_today: "اليوم",
+    ov_title: "نظرة على اليوم",
+    ov_desc: "لقطة مباشرة لمطعمك — الإيرادات والطلبات وما يعشقه زبائنك الآن.",
+    ov_viewAll: "عرض كل الطلبات",
+    ov_revenue: "إيرادات اليوم",
+    ov_totalOrders: "إجمالي الطلبات",
+    ov_awaiting: "بانتظار المعالجة",
+    ov_inKitchen: "في المطبخ",
+    ov_completed: "مكتملة",
+    ov_avgOrder: "متوسط قيمة الطلب",
+    ov_perPaid: "لكل طلب مدفوع",
+    ov_paidSub_one: "طلب مدفوع واحد",
+    ov_paidSub_other: "{n} طلبات مدفوعة",
+    ov_revByHour: "الإيرادات حسب الساعة",
+    ov_revByHourSub: "ما ولّدته كل ساعة حتى الآن",
+    ov_ordersByHour: "الطلبات حسب الساعة",
+    ov_peak: "الذروة: {hour} · {count} طلب",
+    ov_noOrdersToday: "لا طلبات اليوم بعد",
+    ov_bestSellers: "المنتجات الأكثر مبيعاً",
+    ov_noSales: "لا مبيعات بعد — تتعبّأ الرسوم البيانية مع طلبات الزبائن",
+    ov_sold_one: "وُبِيع {n}",
+    ov_sold_other: "وُبِيع {n}",
+    ov_recentOrders: "أحدث الطلبات",
+    ov_seeAll: "عرض الكل",
+    ov_noOrdersYet: "لا طلبات بعد — أول مسح من زبون سيظهر هنا",
+
+    ord_eyebrow: "المالك · الطلبات",
+    ord_title: "الطلبات المباشرة",
+    ord_desc: "تتبّع كل طلب يصلك اليوم — اقبل وسوِّ كل طلب أثناء مروره بالخدمة.",
+    ord_acceptToast: "تم قبول الطلب",
+    ord_acceptToastDesc: "المطبخ يباشر التحضير.",
+    ord_paidToast: "تم تحديد الطلب كمدفوع",
+    ord_paidToastDesc: "طلب آخر مُسلَّم.",
+    ord_emptyTitle: "لا طلبات هنا",
+    ord_emptyLive: "ستظهر الطلبات فور أن يمسح الزبائن ويقدموا طلباتهم.",
+    ord_emptyDemo: "بيانات تجريبية. احفظ منيّوك مرة لتظهر هنا الطلبات المباشرة من مسح الزبائن.",
+
+    oc_table: "طاولة",
+    oc_accept: "قبول الطلب",
+    oc_markPaid: "حدّد كمدفوع",
+
+    w_terminal: "محطة الموظف",
+    w_cashier: "صرّاف",
+    w_orders_one: "{n} طلب جديد",
+    w_orders_other: "{n} طلبات جديدة",
+    w_dashboardEyebrow: "محطة الصراف",
+    w_desc: "كل مسح من {venue} يصل هنا. دفّع الطلبات: اقبل ثم سلّم.",
+    w_colPending: "طلبات جديدة",
+    w_hintPending: "اقبله عندما يبدأ المطبخ التحضير",
+    w_hintAccepted: "قيد التحضير — سوِّ عند الدفع",
+    w_hintPaid: "مكتملة ومُسلَّمة",
+    w_empty: "لا شيء هنا بعد",
+    w_acceptDesc: "أُرسلت إلى المطبخ.",
+    w_paidToast: "حُدّدت كمدفوعة",
+    w_paidDesc: "الفاتورة سُدّت. لننتقل إلى التالي.",
+
+    inv_header: "دعوة موظف",
+    inv_loading: "جارٍ تحميل الدعوة…",
+    inv_notFound: "الدعوة غير موجودة",
+    inv_notFoundDesc:
+      "رابط الدعوة منتهي الصلاحية أو مستخدم مسبقاً أو غير موجود. اطلب من المالك توليد رابط جديد.",
+    inv_backHome: "العودة إلى سُفرة",
+    inv_welcome: "انضممتَ — مرحباً بك في {name}",
+    inv_ready: "حساب {role} جاهز. جارٍ فتح المحطة…",
+    inv_invitedTo: "تمت دعوتك للانضمام إلى",
+    inv_roleManager: "ستحصل على إشراف كامل على الطاولات والموظفين والطلبات المباشرة.",
+    inv_roleCashier: "ستستقبل الطلبات عند الصندوق وتسلّمها من المحطة.",
+    inv_expires24: "بعد 24 ساعة",
+    inv_name: "اسمك",
+    inv_namePh: "مثال: ياسين",
+    inv_accept: "قبول الدعوة",
+    inv_noAcc: "لا حاجة لحساب — ستدخل مباشرة إلى محطة الصراف.",
+    inv_welcomeToast: "مرحباً بك!",
+    inv_welcomeToastDesc: "انضممت إلى {name} بدور {role}.",
+    inv_dlgTitle: "دعوة موظف",
+    inv_dlgDesc: "اختر دوراً وسنولّد لك QR دعوة خاصاً.",
+    inv_roleCashierHint: "يستلم الطلبات على جهاز الصراف ويحصّلها.",
+    inv_roleManagerHint: "إشراف كامل على الطاولات والموظفين والطلبات المباشرة.",
+    inv_generate: "توليد الدعوة",
+    inv_expiresAuto: "تنتهي تلقائياً خلال 24 ساعة",
+    inv_readyTitle: "الدعوة جاهزة",
+    inv_readyDesc: "شارك هذا الرابط — أو دعهم يمسحون QR للقبول بدور {role}.",
+    inv_linkLabel: "رابط الدعوة",
+    inv_expires24Short: "{role} · ينتهي خلال 24 ساعة",
+    inv_awaiting: "في انتظار القبول",
+    inv_createAnother: "إنشاء دعوة أخرى",
+
+    wk_eyebrow: "المالك · الموظفون",
+    wk_title: "فريقك",
+    wk_desc:
+      "صرافون ومديرون، لكل منهم محطته. ادعُ شخصاً وسيقبل عبر الـ QR.",
+    wk_invite: "دعوة موظف",
+    wk_active: "الموظفون النشطون · {n}",
+    wk_joined: "انضم {date}",
+    wk_statusActive: "نشط",
+    wk_statusPending: "معلّق",
+    wk_copy: "نسخ",
+    wk_invites: "دعوات معلّقة · {n}",
+    wk_valid24: "صالح لمدة 24 ساعة",
+    wk_noInvites: "لا دعوات معلّقة",
+    wk_noInvitesSub: "اضغط «دعوة موظف» لتوليد رابط دعوة قابل للمسح.",
+    wk_inviteFor: "دعوة {role}",
+    wk_copyTitle: "نسخ رابط الدعوة",
+    wk_removeTitle: "إزالة الدعوة",
+    wk_removedToast: "تمت إزالة الدعوة",
+
+    na_newOrder: "طلب جديد #{n}",
+    na_desc: "الطاولة {t} · {items}",
+    na_view: "عرض",
+    na_new: "طلب جديد",
+    na_venue: "طلب جديد في {venue}",
+    na_body: "الطلب #{n} · الطاولة {t}",
+    wd_newOrders: "طلبات جديدة",
+    wd_pendingHint: "اقبل عندما تبدأ المطبخ بتحضيرها",
+    wd_acceptedHint: "قيد التحضير — حصّل عند الدفع",
+    wd_paidHint: "مكتملة ومحصّلة",
+    wd_acceptToast: "تم قبول الطلب",
+    wd_acceptToastDesc: "تم تحويله إلى المطبخ.",
+    wd_paidToast: "تم تحديدها كمدفوعة",
+    wd_paidToastDesc: "أُغلقت الفاتورة. إلى التالي.",
+    wd_desc: "كل عملية مسح من {venue} تظهر هنا. تابعوها: اقبلوا ثم حصّلوا.",
+    wd_nothing: "لا شيء بعد",
+
+    tb_eyebrow: "المالك · الطاولات والـ QR",
+    tb_title: "الطاولات وأكواد الـ QR",
+    tb_desc:
+      "ولّد كود QR فريداً لكل طاولة. يمسح الزبائن ويتصفحون ويطلبون من هواتفهم.",
+    tb_tablesLabel: "الطاولات",
+    tb_tableLabel: "الطاولة",
+    tb_generate: "توليد الطاولات",
+    tb_downloadAll: "تنزيل الكل",
+    tb_print: "طباعة أكواد الـ QR",
+    tb_generated_one: "تم إنشاء طاولة واحدة",
+    tb_generated_other: "تم إنشاء {n} طاولات",
+    tb_generatedDesc: "لكل طاولة الآن كود QR فريد خاص بها.",
+    tb_downloading_one: "جارٍ تنزيل كود QR",
+    tb_downloading_other: "جارٍ تنزيل {n} أكواد QR",
+    tb_downloadingDesc: "تحقق من مجلد التنزيلات.",
+    tb_noTables: "لا طاولات بعد",
+    tb_noTablesDesc:
+      "اختر عدداً بالأعلى واضغط «توليد الطاولات» لإنشاء أكواد QR قابلة للطباعة.",
+    tb_menuUrl: "رابط المنيو",
+    tb_downloadQr: "تنزيل الـ QR",
+    tb_linked: "مرتبط بعلامتك",
+    tb_printHeader: "{name} · الطاولة {t}",
+
+    st_eyebrow: "المالك · الإعدادات",
+    st_title: "إعدادات المطعم",
+    st_desc: "علامتك ومنيّوك وبياناتك — كل ما يعرفه جانب التشغيل عنك.",
+    st_branding: "الهوية",
+    st_accent: "اللون المميز",
+    st_sections: "الأقسام",
+    st_products: "المنتجات",
+    st_ops: "التشغيل",
+    st_opsValue: "{tables} طاولات · {workers} موظفين",
+    st_editAll: "تعديل المنيو والهوية",
+    st_cloudSync: "المزامنة السحابية",
+    st_cloudSyncDesc:
+      "يُحفظ منيّوك تلقائياً في السحابة فور بدء التحرير — امسح كود طاولة من أي هاتف لرؤيته مباشرة. تصل طلبات الزبائن هنا في الوقت الحقيقي.",
+    st_data: "البيانات",
+    st_loadSample: "تحميل بيانات تجريبية",
+    st_loadSampleToast: "تم تحميل بيانات المقهى التجريبية",
+    st_loadSampleToastDesc: "أُعيد ضبط المنيو والتشغيل على المقهى التجريبي.",
+    st_reset: "إعادة تعيين الكل",
+    st_resetToast: "تمت إعادة تعيين الحالة",
+    st_cover: "غلاف المنيو",
+
+    me_eyebrow: "المالك · محرر المنيو",
+    me_title: "المنيو والهوية",
+    me_desc:
+      "كل ما يراه الزبائن عند مسح كود الـ QR. التعديلات تُحفظ تلقائياً.",
+    me_tabIdentity: "الهوية",
+    me_tabFF: "المظهر",
+    me_tabCategories: "الأصناف",
+    me_tabProducts: "المنتجات",
+    me_hidePreview: "إخفاء المعاينة",
+    me_showPreview: "عرض المعاينة",
+    me_livePreview: "معاينة مباشرة · تتحدث أثناء التحرير",
+    me_livePreviewDesktop: "معاينة جوال مباشرة · تتحدث أثناء التحرير",
+    me_eyebrowId: "المالك · الهوية",
+    me_eyebrowFF: "المالك · المظهر",
+    me_eyebrowCats: "المالك · الأصناف",
+    me_eyebrowProds: "المالك · المنتجات",
+
+    ob_partner: "بوابة الشريك",
+    ob_restaurant: "المطعم",
+    ob_yourCafe: "مقهاك",
+    ob_demoData: "بيانات تجريبية",
+    ob_resetTitle: "إعادة ضبط بيانات المقهى التجريبي",
+    ob_hidePreview: "إخفاء المعاينة",
+    ob_sidePreview: "معاينة جانبية",
+    ob_publish: "نشر",
+    ob_next: "التالي: {name}",
+    ob_back: "رجوع",
+    ob_continue: "متابعة",
+    ob_syncing: "مزامنة مباشرة",
+    ob_fullPreview: "فتح المعاينة الكاملة",
+    ob_progress: "تقدم الإعداد",
+    ob_stp1: "الهوية",
+    ob_stp2: "التصميم",
+    ob_stp3: "الأصناف",
+    ob_stp4: "المنتجات",
+    ob_stp5: "معاينة مباشرة",
+    ob_stp1t: "هوية المطعم",
+    ob_stp1d: "الاسم وشعار العلامة",
+    ob_stp2t: "التصميم والأجواء",
+    ob_stp2d: "الألوان والغلاف والأجواء",
+    ob_stp3t: "أصناف المنيو",
+    ob_stp3d: "نظّم المنيو والأقسام",
+    ob_stp4t: "الأطباق والمنتجات",
+    ob_stp4d: "العناصر والأسعار والوسوم والصور",
+    ob_stp5t: "معاينة العميل المباشرة",
+    ob_stp5d: "منيو QR تفاعلي للجوال",
+  },
+};
+
+const RATES: Record<AppCurrency, number> = {
+  tnd: 1,
+  usd: 0.31,
+  eur: 0.29,
+};
+
+interface I18nContextValue {
+  lang: AppLang;
+  setLang: (l: AppLang) => void;
+  cur: AppCurrency;
+  setCur: (c: AppCurrency) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  plural: (n: number, oneKey: string, otherKey: string) => string;
+  formatPrice: (amount: number) => string;
+  isAr: boolean;
+}
+
+const I18nContext = createContext<I18nContextValue | null>(null);
+
+const LANG_KEY = "sufra.lang";
+const CUR_KEY = "sufra.cur";
+
+function parseLang(v: string | null): AppLang {
+  return v === "fr" || v === "ar" ? v : "en";
+}
+
+function parseCur(v: string | null): AppCurrency {
+  return v === "usd" || v === "eur" || v === "tnd" ? v : "tnd";
+}
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  const [lang, setLangState] = useState<AppLang>(() => {
+    if (typeof window === "undefined") return "en";
+    return parseLang(window.localStorage.getItem(LANG_KEY));
+  });
+  const [cur, setCurState] = useState<AppCurrency>(() => {
+    if (typeof window === "undefined") return "tnd";
+    return parseCur(window.localStorage.getItem(CUR_KEY));
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LANG_KEY, lang);
+    } catch {
+      /* private mode */
+    }
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+  }, [lang]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CUR_KEY, cur);
+    } catch {
+      /* private mode */
+    }
+  }, [cur]);
+
+  const t = (key: string, vars?: Record<string, string | number>) => {
+    const dict = copy[lang];
+    let val = dict[key];
+    if (val === undefined) return key;
+    if (vars) {
+      for (const [k, v] of Object.entries(vars)) {
+        val = val.split(`{${k}}`).join(String(v));
+      }
+    } else {
+      val = val.split("{year}").join(String(new Date().getFullYear()));
+    }
+    return val;
+  };
+
+  const plural = (n: number, oneKey: string, otherKey: string) =>
+    t(n === 1 ? oneKey : otherKey, { n });
+
+  const formatPrice = (amount: number) => {
+    const v = amount * RATES[cur];
+    if (cur === "tnd") return `${v.toFixed(3)} DT`;
+    return `${cur === "eur" ? "€" : "$"}${v.toFixed(2)}`;
+  };
+
+  return (
+    <I18nContext.Provider
+      value={{
+        lang,
+        setLang: setLangState,
+        cur,
+        setCur: setCurState,
+        t,
+        plural,
+        formatPrice,
+        isAr: lang === "ar",
+      }}
+    >
+      {children}
+    </I18nContext.Provider>
+  );
+}
+
+export function useI18n(): I18nContextValue {
+  const ctx = useContext(I18nContext);
+  if (!ctx) throw new Error("useI18n must be used within I18nProvider");
+  return ctx;
+}

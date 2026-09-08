@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { WorkerRole } from "@/lib/constants";
+import { useI18n } from "@/lib/i18n";
 
 const ROLE_VALUES: string[] = ["Cashier", "Manager"];
 
@@ -20,6 +21,7 @@ function InviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { invites, acceptInvite, createInvite, restaurantName, brandColor } = useOnboarding();
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -45,7 +47,7 @@ function InviteContent() {
     : (storeInvite?.role ?? "Cashier");
   const displayName = nameParam || restaurantName || "Velvet & Stone Coffee";
   const accent = colorParam || brandColor.value;
-  const expiry = storeInvite?.expiresAt ?? "In 24 hours";
+  const expiry = storeInvite?.expiresAt ?? t("inv_expires24");
 
   const handleAccept = () => {
     if (!valid || alreadyAccepted) return;
@@ -54,8 +56,8 @@ function InviteContent() {
     }
     acceptInvite(token, name);
     setAccepted(true);
-    toast.success("Welcome aboard!", {
-      description: `You joined ${displayName} as ${role}.`,
+    toast.success(t("inv_welcomeToast"), {
+      description: t("inv_welcomeToastDesc", { name: displayName, role }),
     });
     setTimeout(() => router.push("/worker/dashboard"), 900);
   };
@@ -72,7 +74,7 @@ function InviteContent() {
           <BrandWordmark />
         </Link>
         <span className="text-xs font-mono uppercase tracking-widest text-white/40">
-          Worker Invite
+          {t("inv_header")}
         </span>
       </header>
 
@@ -80,7 +82,7 @@ function InviteContent() {
         {!mounted ? (
           <div className="rounded-2xl border border-white/10 bg-[#0D0D0D] p-8 text-center animate-pulse">
             <p className="text-xs font-mono uppercase tracking-widest text-white/40">
-              Loading invite…
+              {t("inv_loading")}
             </p>
           </div>
         ) : !valid ? (
@@ -88,14 +90,13 @@ function InviteContent() {
             <div className="w-12 h-12 mx-auto rounded-full border border-white/10 bg-white/5 flex items-center justify-center">
               <span className="text-lg">🕓</span>
             </div>
-            <h1 className="mt-5 text-xl font-serif italic text-white">Invite not found</h1>
+            <h1 className="mt-5 text-xl font-serif italic text-white">{t("inv_notFound")}</h1>
             <p className="mt-2 text-sm text-white/40 leading-relaxed">
-              This invite link is expired, was already used, or doesn’t exist. Ask the owner to
-              generate a new one.
+              {t("inv_notFoundDesc")}
             </p>
             <Link href="/" className="mt-6 inline-block">
               <Button variant="outline" size="sm">
-                Back to Sufra
+                {t("inv_backHome")}
               </Button>
             </Link>
           </div>
@@ -105,9 +106,9 @@ function InviteContent() {
               <Check className="w-5 h-5 text-emerald-400" />
             </div>
             <h1 className="mt-5 text-xl font-serif italic text-white">
-              You’re in — welcome to {displayName}
+              {t("inv_welcome", { name: displayName })}
             </h1>
-            <p className="mt-2 text-sm text-white/40">{role} account ready. Opening your terminal…</p>
+            <p className="mt-2 text-sm text-white/40">{t("inv_ready", { role })}</p>
           </div>
         ) : (
           <div className="rounded-2xl border border-white/10 bg-[#0D0D0D] overflow-hidden animate-fade-up">
@@ -121,7 +122,7 @@ function InviteContent() {
               </div>
 
               <p className="mt-5 text-center text-[10px] font-mono uppercase tracking-widest text-white/40">
-                You’ve been invited to join
+                {t("inv_invitedTo")}
               </p>
               <h1 className="mt-1.5 text-center text-2xl sm:text-3xl font-serif italic text-white leading-tight">
                 {displayName}
@@ -143,8 +144,8 @@ function InviteContent() {
 
               <p className="mt-5 text-center text-xs text-white/40 leading-relaxed">
                 {role === "Manager"
-                  ? "You’ll get full oversight of tables, workers, and live orders."
-                  : "You’ll take orders at the register and settle them from the terminal."}
+                  ? t("inv_roleManager")
+                  : t("inv_roleCashier")}
               </p>
 
               <div className="mt-5 flex items-center justify-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-white/35">
@@ -154,23 +155,23 @@ function InviteContent() {
 
               <div className="mt-5 space-y-2">
                 <label htmlFor="worker-name" className="block text-[10px] font-mono uppercase tracking-widest text-white/40">
-                  Your name
+                  {t("inv_name")}
                 </label>
                 <Input
                   id="worker-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Yassine"
+                  placeholder={t("inv_namePh")}
                 />
               </div>
 
               <Button type="button" className="mt-4 w-full font-bold" size="lg" onClick={handleAccept}>
-                Accept Invite
+                {t("inv_accept")}
                 <ArrowRight className="w-4 h-4 text-black" />
               </Button>
 
               <p className="mt-4 text-center text-[10px] text-white/35">
-                No account needed — you’ll land straight in the cashier terminal.
+                {t("inv_noAcc")}
               </p>
             </div>
           </div>
