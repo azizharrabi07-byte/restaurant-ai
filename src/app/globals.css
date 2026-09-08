@@ -156,6 +156,49 @@ body {
   animation: fade-up 0.4s ease-out both;
 }
 
+/* ── Landing entrance + ambient animations ─────────────────────── */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+@keyframes glow {
+  from { opacity: 0.35; }
+  to   { opacity: 0.75; }
+}
+.anim-rise {
+  animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.anim-floaty {
+  animation: floaty 7s ease-in-out infinite;
+}
+.anim-glow {
+  animation: glow 5s ease-in-out infinite alternate;
+}
+.d-1 { animation-delay: 0.05s; }
+.d-2 { animation-delay: 0.10s; }
+.d-3 { animation-delay: 0.15s; }
+.d-4 { animation-delay: 0.20s; }
+.d-5 { animation-delay: 0.25s; }
+.d-6 { animation-delay: 0.30s; }
+.d-7 { animation-delay: 0.35s; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise,
+  .anim-floaty,
+  .anim-glow {
+    animation: none;
+  }
+}
+
+/* Arabic headings inherit Cairo (no serif italics in Arabic) */
+[dir="rtl"] .font-serif {
+  font-family: "Cairo", var(--font-sans);
+  font-style: normal;
+}
+
 /* ── Utility: hide scrollbars on horizontal stepper ────────────── */
 .no-scrollbar {
   -ms-overflow-style: none;
@@ -163,4 +206,11 @@ body {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* ── Printable QR sheets ───────────────────────────────────────── */
+@media print {
+  body {
+    background: #ffffff;
+  }
 }

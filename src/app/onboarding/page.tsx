@@ -11,10 +11,7 @@ import { StepBranding } from "@/components/onboarding/step-branding";
 import { StepCategories } from "@/components/onboarding/step-categories";
 import { StepProducts } from "@/components/onboarding/step-products";
 import { StepPreview } from "@/components/onboarding/step-preview";
-import {
-  OnboardingProvider,
-  useOnboarding,
-} from "@/lib/onboarding-store";
+import { useOnboarding } from "@/lib/onboarding-store";
 import { PhoneMockup } from "@/components/phone-mockup";
 
 function WizardInner() {
@@ -28,6 +25,7 @@ function WizardInner() {
     categories,
     products,
     cover,
+    theme,
     loadDemo,
   } = useOnboarding();
 
@@ -140,6 +138,7 @@ function WizardInner() {
                   categories={categories}
                   products={products}
                   cover={cover}
+                  theme={theme}
                   className="scale-[0.85] origin-top -my-10"
                 />
                 <button
@@ -162,9 +161,5 @@ function WizardInner() {
 }
 
 export default function OnboardingPage() {
-  return (
-    <OnboardingProvider>
-      <WizardInner />
-    </OnboardingProvider>
-  );
+  return <WizardInner />;
 }

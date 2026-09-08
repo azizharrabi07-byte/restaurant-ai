@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, UtensilsCrossed } from "lucide-react";
+import { Plus, Pencil, Trash2, UtensilsCrossed, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ImageDropzone } from "@/components/image-dropzone";
 import {
   Dialog,
@@ -35,15 +36,24 @@ interface ProductFormProps {
 function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
   const { categories } = useOnboarding();
   const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
   const [price, setPrice] = useState(initial?.price?.toString() ?? "");
   const [categoryId, setCategoryId] = useState(initial?.categoryId ?? categories[0]?.id ?? "");
   const [image, setImage] = useState<string | null>(initial?.image ?? null);
+  const [available, setAvailable] = useState(initial?.isAvailable ?? true);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = parseFloat(price);
     if (!name.trim() || isNaN(parsed) || parsed < 0 || !categoryId) return;
-    onSubmit({ name: name.trim(), price: parsed, categoryId, image });
+    onSubmit({
+      name: name.trim(),
+      description: description.trim(),
+      price: parsed,
+      categoryId,
+      image,
+      isAvailable: available,
+    });
   };
 
   return (
@@ -57,6 +67,18 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
+        />
+      </div>
+
+      <div>
+        <label className="text-[11px] uppercase tracking-widest text-white/60 font-medium block mb-1.5">
+          Description
+        </label>
+        <Textarea
+          placeholder="A one-line description guests see under the item name."
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
         />
       </div>
 
@@ -94,6 +116,30 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
         </div>
       )}
 
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+        <div>
+          <p className="text-xs font-medium text-white">Availability</p>
+          <p className="text-[11px] text-white/40">
+            {available
+              ? "Guests can see and order this item."
+              : "Hidden from guests until you turn it back on."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAvailable((a) => !a)}
+          className={cn(
+            "flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-mono px-3 py-1.5 rounded-full border transition-all cursor-pointer",
+            available
+              ? "text-white bg-white/10 border-white/20"
+              : "text-white/40 bg-transparent border-white/10",
+          )}
+        >
+          {available ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+          {available ? "Available" : "Hidden"}
+        </button>
+      </div>
+
       <ImageDropzone
         value={image}
         onChange={setImage}
@@ -113,7 +159,7 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
   );
 }
 
-export function StepProducts() {
+export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
   const { categories, products, addProduct, updateProduct, removeProduct } = useOnboarding();
 
   const [showAdd, setShowAdd] = useState(false);
@@ -130,7 +176,7 @@ export function StepProducts() {
   return (
     <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
-        eyebrow="Step 04 · Products"
+        eyebrow={headingEyebrow ?? "Step 04 · Products"}
         title="Add your signature dishes"
         description="Add your dishes, drinks, or services with their prices in Tunisian Dinars."
       >
@@ -229,7 +275,17 @@ export function StepProducts() {
 
                   <div className="flex-1 flex-col flex justify-between min-w-0">
                     <div className="min-w-0">
-                      <h4 className="text-xs font-medium text-white truncate">{p.name}</h4>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="text-xs font-medium text-white truncate">{p.name}</h4>
+                        {!p.isAvailable && (
+                          <span className="text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                            Hidden
+                          </span>
+                        )}
+                      </div>
+                      {p.description && (
+                        <p className="text-[11px] text-white/40 truncate mt-0.5">{p.description}</p>
+                      )}
                       <span className="text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 rounded bg-white/5 text-white/60 border border-white/10 inline-block mt-1">
                         {getCategoryName(p.categoryId)}
                       </span>

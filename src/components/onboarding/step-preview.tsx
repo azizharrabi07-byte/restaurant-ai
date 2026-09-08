@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   Building2,
   Palette,
   FolderTree,
   Utensils,
   ArrowLeft,
+  ArrowRight,
   Check,
   Copy,
   CloudUpload,
@@ -23,14 +25,15 @@ interface StepPreviewProps {
 }
 
 export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
-  const { restaurantName, logo, brandColor, categories, products, cover } = useOnboarding();
+  const { restaurantName, logo, brandColor, categories, products, cover, theme } =
+    useOnboarding();
   const [finished, setFinished] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
   const handleFinish = () => {
     setFinished(true);
     toast.success("Setup complete!", {
-      description: "Backend integration with Supabase will connect this menu to live QR orders.",
+      description: "Your demo menu is ready. Open the owner dashboard when you’re ready.",
       duration: 5000,
     });
   };
@@ -188,10 +191,12 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
             </Button>
 
             {finished ? (
-              <span className="text-xs font-mono text-emerald-400 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                <Check className="w-3.5 h-3.5" />
-                Setup complete — ready for Supabase
-              </span>
+              <Link href="/dashboard">
+                <Button type="button" className="font-bold text-xs">
+                  Go to Dashboard
+                  <ArrowRight className="w-3.5 h-3.5 text-black" />
+                </Button>
+              </Link>
             ) : (
               <Button type="button" onClick={handleFinish} className="font-bold text-xs">
                 <CloudUpload className="w-3.5 h-3.5 text-black" />
@@ -205,8 +210,9 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
             <div className="text-xs text-white/40 leading-relaxed">
               <p className="font-medium text-white/80 mb-1">What happens next?</p>
               <p>
-                Connect Supabase for database, authentication, and storage. Each table will get a
-                unique QR code that customers scan to view this menu and place orders directly.
+                From the Owner Dashboard you can generate a unique QR code for every table,
+                print them, invite workers, and watch orders arrive in real time. Your menu
+                is synced to the cloud as you edit — scan the menu link above on any phone.
               </p>
             </div>
           </div>
@@ -221,6 +227,7 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
             categories={categories}
             products={products}
             cover={cover}
+            theme={theme}
           />
         </div>
       </div>

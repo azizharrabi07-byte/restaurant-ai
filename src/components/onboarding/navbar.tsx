@@ -1,6 +1,7 @@
 import { RefreshCw, Smartphone, CloudUpload } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { BrandMark, BrandWordmark } from "@/components/brand-logo";
 
 interface NavbarProps {
   restaurantName: string;
@@ -24,10 +25,10 @@ export function Navbar({
       {/* Left: Brand Identity */}
       <div className="flex items-center gap-3">
         <Link href="/" className="flex items-center gap-3 group cursor-pointer">
-          <div className="w-8 h-8 bg-white flex items-center justify-center rounded-sm shrink-0 transition-transform group-hover:rotate-45">
-            <div className="w-4 h-4 border-2 border-black rotate-45"></div>
+          <div className="w-8 h-8 bg-white text-black flex items-center justify-center rounded-sm shrink-0 transition-transform group-hover:rotate-45 overflow-hidden">
+            <BrandMark className="scale-90" />
           </div>
-          <span className="text-lg font-serif italic tracking-tight text-white">Tawla</span>
+          <BrandWordmark />
           <span className="text-xs uppercase tracking-widest text-white/40 ml-4 border-l border-white/20 pl-4 hidden sm:inline-block">
             Partner Portal
           </span>

@@ -37,3 +37,7 @@ supabase/.temp
 
 # n8n local data
 .n8n/
+
+# dev server logs
+.dev.log
+.dev.err.log

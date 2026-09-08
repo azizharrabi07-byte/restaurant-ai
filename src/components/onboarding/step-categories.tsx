@@ -38,7 +38,7 @@ const BISTRO_PRESETS = [
   "Signature Cocktails & Wine",
 ];
 
-export function StepCategories() {
+export function StepCategories({ headingEyebrow }: { headingEyebrow?: string }) {
   const {
     categories,
     products,
@@ -86,7 +86,7 @@ export function StepCategories() {
   return (
     <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
-        eyebrow="Step 03 · Categories"
+        eyebrow={headingEyebrow ?? "Step 03 · Categories"}
         title="Organize your menu"
         description="Create and manage sections like Starters, Mains, Pastries, or Cocktails."
       >
