@@ -14,7 +14,7 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  let body: { status?: string; isPaid?: boolean };
+  let body: { status?: string; isPaid?: boolean; acceptedBy?: string; acceptedByName?: string };
   try {
     body = await req.json();
   } catch {
@@ -53,11 +53,29 @@ export async function PATCH(
   if (body.isPaid === true) updates.is_paid = true;
   if (updates.is_paid === true) updates.paid_at = new Date().toISOString();
 
+  // Record which worker accepted the order. The accepted_by columns only
+  // exist after the owner runs the migration SQL, so we degrade gracefully:
+  // if the columns are missing we fall back to the status-only update.
+  if (updates.status === "accepted" && body.acceptedBy) {
+    updates.accepted_by = body.acceptedBy;
+    if (body.acceptedByName) updates.accepted_by_name = body.acceptedByName;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
-  const { error } = await supabaseAdmin.from("orders").update(updates).eq("id", id);
+  let { error } = await supabaseAdmin.from("orders").update(updates).eq("id", id);
+  if (error && updates.accepted_by !== undefined) {
+    const withoutAcceptedBy = { ...updates };
+    delete withoutAcceptedBy.accepted_by;
+    delete withoutAcceptedBy.accepted_by_name;
+    const retry = await supabaseAdmin
+      .from("orders")
+      .update(withoutAcceptedBy)
+      .eq("id", id);
+    error = retry.error;
+  }
   if (error) {
     return NextResponse.json({ cloud: false, error: "UPDATE" }, { status: 500 });
   }

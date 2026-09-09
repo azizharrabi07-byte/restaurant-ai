@@ -39,6 +39,12 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
         <StatusBadge status={order.status} />
       </div>
 
+      {order.acceptedBy && order.acceptedByName && (
+        <p className="-mt-2 text-[10px] font-mono text-white/30">
+          {t("oc_acceptedBy", { n: order.acceptedByName })}
+        </p>
+      )}
+
       <div className="space-y-1.5">
         {order.items.map((item, i) => (
           <div key={i} className="flex items-center justify-between gap-3 text-xs">

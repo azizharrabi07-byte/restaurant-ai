@@ -6,12 +6,14 @@ export interface BrandColor {
   value: string;
   accentBg?: string;
   category?: string;
+  nameKey?: string;
 }
 
 export interface CoverPreset {
   id: string;
   label: string;
   url: string;
+  labelKey?: string;
 }
 
 export interface Category {
@@ -32,12 +34,12 @@ export interface Product {
 
 export type BusinessType = "cafe" | "restaurant" | "bar" | "bakery" | "other";
 
-export const BUSINESS_TYPES: { value: BusinessType; label: string }[] = [
-  { value: "cafe", label: "Café" },
-  { value: "restaurant", label: "Restaurant" },
-  { value: "bar", label: "Bar / Lounge" },
-  { value: "bakery", label: "Bakery" },
-  { value: "other", label: "Other" },
+export const BUSINESS_TYPES: { value: BusinessType; label: string; labelKey: string }[] = [
+  { value: "cafe", label: "Café", labelKey: "bt_cafe" },
+  { value: "restaurant", label: "Restaurant", labelKey: "bt_restaurant" },
+  { value: "bar", label: "Bar / Lounge", labelKey: "bt_bar" },
+  { value: "bakery", label: "Bakery", labelKey: "bt_bakery" },
+  { value: "other", label: "Other", labelKey: "bt_other" },
 ];
 
 export type MenuTheme = "classic" | "minimal" | "vibrant" | "gallery";
@@ -46,26 +48,36 @@ export const MENU_THEMES: {
   id: MenuTheme;
   label: string;
   description: string;
+  labelKey: string;
+  descriptionKey: string;
 }[] = [
   {
     id: "classic",
     label: "Classic",
     description: "Serif title, pill category chips, image row cards. Balanced and familiar.",
+    labelKey: "th_classic",
+    descriptionKey: "th_classicD",
   },
   {
     id: "minimal",
     label: "Minimal",
     description: "Clean mono type, hairline separators, images hidden, quiet and calm.",
+    labelKey: "th_minimal",
+    descriptionKey: "th_minimalD",
   },
   {
     id: "vibrant",
     label: "Vibrant",
     description: "Big serif headline, accent-filled blocks, image-first cards with edge tint.",
+    labelKey: "th_vibrant",
+    descriptionKey: "th_vibrantD",
   },
   {
     id: "gallery",
     label: "Gallery",
     description: "Large 4:3 photos on top of every dish, bold prices, editorial feel.",
+    labelKey: "th_gallery",
+    descriptionKey: "th_galleryD",
   },
 ];
 
@@ -110,6 +122,14 @@ export interface Order {
   isPaid: boolean;
   items: OrderItem[];
   total: number;
+  acceptedBy?: string | null;
+  acceptedByName?: string | null;
+}
+
+export interface WorkerSession {
+  id: string;
+  name: string;
+  role: WorkerRole;
 }
 
 export type WorkerRole = "Cashier" | "Manager";
@@ -149,33 +169,37 @@ export const DEFAULT_COLOR: BrandColor = {
   value: "#D97706",
   accentBg: "rgba(217, 119, 6, 0.15)",
   category: "Warm",
+  nameKey: "cl_amber",
 };
 
 export const BRAND_PALETTE: BrandColor[] = [
-  { id: "amber", name: "Amber Roast", value: "#D97706", accentBg: "rgba(217, 119, 6, 0.15)", category: "Warm" },
-  { id: "terracotta", name: "Terracotta Clay", value: "#E05A47", accentBg: "rgba(224, 90, 71, 0.15)", category: "Warm" },
-  { id: "emerald", name: "Sage Botanical", value: "#059669", accentBg: "rgba(5, 150, 105, 0.15)", category: "Natural" },
-  { id: "burgundy", name: "Bordeaux Noir", value: "#9F1239", accentBg: "rgba(159, 18, 57, 0.15)", category: "Luxe" },
-  { id: "indigo", name: "Deep Indigo", value: "#4F46E5", accentBg: "rgba(79, 70, 229, 0.15)", category: "Modern" },
-  { id: "slate", name: "Nordic Charcoal", value: "#334155", accentBg: "rgba(51, 65, 85, 0.15)", category: "Minimal" },
-  { id: "copper", name: "Burnt Sienna", value: "#B45309", accentBg: "rgba(180, 83, 9, 0.15)", category: "Warm" },
-  { id: "gold", name: "Champagne Gold", value: "#CA8A04", accentBg: "rgba(202, 138, 4, 0.15)", category: "Luxe" },
+  { id: "amber", name: "Amber Roast", value: "#D97706", accentBg: "rgba(217, 119, 6, 0.15)", category: "Warm", nameKey: "cl_amber" },
+  { id: "terracotta", name: "Terracotta Clay", value: "#E05A47", accentBg: "rgba(224, 90, 71, 0.15)", category: "Warm", nameKey: "cl_terracotta" },
+  { id: "emerald", name: "Sage Botanical", value: "#059669", accentBg: "rgba(5, 150, 105, 0.15)", category: "Natural", nameKey: "cl_emerald" },
+  { id: "burgundy", name: "Bordeaux Noir", value: "#9F1239", accentBg: "rgba(159, 18, 57, 0.15)", category: "Luxe", nameKey: "cl_burgundy" },
+  { id: "indigo", name: "Deep Indigo", value: "#4F46E5", accentBg: "rgba(79, 70, 229, 0.15)", category: "Modern", nameKey: "cl_indigo" },
+  { id: "slate", name: "Nordic Charcoal", value: "#334155", accentBg: "rgba(51, 65, 85, 0.15)", category: "Minimal", nameKey: "cl_slate" },
+  { id: "copper", name: "Burnt Sienna", value: "#B45309", accentBg: "rgba(180, 83, 9, 0.15)", category: "Warm", nameKey: "cl_copper" },
+  { id: "gold", name: "Champagne Gold", value: "#CA8A04", accentBg: "rgba(202, 138, 4, 0.15)", category: "Luxe", nameKey: "cl_gold" },
 ];
 
 export const LOGO_PRESETS: CoverPreset[] = [
   {
     id: "coffee-cup",
     label: "Coffee Cup Icon",
+    labelKey: "pre_logoCoffee",
     url: "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=200&q=80",
   },
   {
     id: "croissant",
     label: "Bakery Emblem",
+    labelKey: "pre_logoBakery",
     url: "https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=200&q=80",
   },
   {
     id: "plate",
     label: "Culinary Dish",
+    labelKey: "pre_logoPlate",
     url: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80",
   },
 ];
@@ -184,26 +208,31 @@ export const COVER_PRESETS: CoverPreset[] = [
   {
     id: "morning-counter",
     label: "Morning Counter",
+    labelKey: "pre_coverMorning",
     url: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80",
   },
   {
     id: "bakery-spread",
     label: "Bakery Spread",
+    labelKey: "pre_coverBakery",
     url: "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1200&q=80",
   },
   {
     id: "minimal-interior",
     label: "Warm Minimalist Dining",
+    labelKey: "pre_coverMinimal",
     url: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80",
   },
   {
     id: "bistro-mood",
     label: "Atmospheric Bistro",
+    labelKey: "pre_coverBistro",
     url: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80",
   },
   {
     id: "cocktail-lounge",
     label: "Craft Bar & Cocktails",
+    labelKey: "pre_coverCocktail",
     url: "https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=1200&q=80",
   },
 ];

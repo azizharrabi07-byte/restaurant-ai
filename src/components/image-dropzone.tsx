@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Upload, X, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { downscaleImage } from "@/lib/image-utils";
+import { useI18n } from "@/lib/i18n";
 
 interface ImageDropzoneProps {
   value: string | null;
@@ -13,7 +14,7 @@ interface ImageDropzoneProps {
   shape?: "logo" | "cover" | "wide";
   label?: string;
   hint?: string;
-  presets?: { id: string; url: string; label?: string }[];
+  presets?: { id: string; url: string; label?: string; labelKey?: string }[];
 }
 
 export function ImageDropzone({
@@ -25,6 +26,7 @@ export function ImageDropzone({
   hint,
   presets,
 }: ImageDropzoneProps) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
@@ -64,7 +66,7 @@ export function ImageDropzone({
             className="text-xs text-white/60 hover:text-white inline-flex items-center gap-1 font-medium transition-colors cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{showPresets ? "Hide presets" : "Curated presets"}</span>
+            <span>{showPresets ? t("idz_hidePresets") : t("idz_showPresets")}</span>
           </button>
         )}
       </div>
@@ -72,7 +74,7 @@ export function ImageDropzone({
       {showPresets && presets && presets.length > 0 && (
         <div className="p-3 bg-[#0D0D0D] border border-white/10 rounded-lg mb-1">
           <p className="text-[10px] uppercase tracking-wider text-white/40 mb-2 font-medium">
-            Select a curated high-resolution sample image:
+            {t("idz_selectHint")}
           </p>
           <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
             {presets.map((p) => (
@@ -97,7 +99,7 @@ export function ImageDropzone({
                   referrerPolicy="no-referrer"
                 />
                 <span className="absolute inset-x-0 bottom-0 bg-black/80 text-[8px] uppercase tracking-tight text-white/90 px-1 py-0.5 truncate text-center block">
-                  {p.label}
+                  {p.labelKey ? t(p.labelKey) : p.label}
                 </span>
               </button>
             ))}
@@ -115,7 +117,7 @@ export function ImageDropzone({
           >
             <img
               src={value}
-              alt="Uploaded asset"
+              alt={t("idz_uploadedAlt")}
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
             />
@@ -125,7 +127,7 @@ export function ImageDropzone({
                 onClick={() => inputRef.current?.click()}
                 className="px-3 py-1.5 bg-[#1A1A1A] hover:bg-[#252525] text-white rounded-full text-xs font-medium border border-white/20 transition-colors cursor-pointer"
               >
-                Change
+                {t("idz_change")}
               </button>
               <button
                 type="button"
@@ -134,6 +136,7 @@ export function ImageDropzone({
                   if (inputRef.current) inputRef.current.value = "";
                 }}
                 className="p-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-full text-xs font-medium border border-red-500/30 transition-colors cursor-pointer"
+                title={t("idz_remove")}
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -159,10 +162,10 @@ export function ImageDropzone({
             <Upload className="w-4 h-4" />
           </div>
           <p className="text-xs font-medium text-white/80">
-            <span className="text-white font-semibold underline underline-offset-2">Click to upload</span>{" "}
-            or drag &amp; drop
+            <span className="text-white font-semibold underline underline-offset-2">{t("idz_clickToUpload")}</span>{" "}
+            {t("idz_orDrag")}
           </p>
-          <p className="text-[10px] uppercase tracking-wider text-white/40 mt-1">PNG, JPG or WebP</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/40 mt-1">{t("idz_formatHint")}</p>
         </div>
       )}
 

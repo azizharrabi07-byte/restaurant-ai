@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { PhoneMockup } from "@/components/phone-mockup";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { toast } from "sonner";
 
 interface StepPreviewProps {
@@ -27,13 +28,14 @@ interface StepPreviewProps {
 export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
   const { restaurantName, logo, brandColor, categories, products, cover, theme } =
     useOnboarding();
+  const { t } = useI18n();
   const [finished, setFinished] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
   const handleFinish = () => {
     setFinished(true);
-    toast.success("Setup complete!", {
-      description: "Your demo menu is ready. Open the owner dashboard when you’re ready.",
+    toast.success(t("prv_doneToast"), {
+      description: t("prv_doneToastDesc"),
       duration: 5000,
     });
   };
@@ -49,8 +51,8 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
     {
       step: 1,
       icon: Building2,
-      primary: restaurantName || "Unnamed",
-      secondary: "Business Identity",
+      primary: restaurantName || t("prv_unnamed"),
+      secondary: t("prv_identity"),
     },
     {
       step: 2,
@@ -61,22 +63,22 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
             className="w-3.5 h-3.5 rounded-full border border-white/20"
             style={{ backgroundColor: brandColor.value }}
           />
-          <span>Brand Accent</span>
+          <span>{t("br_primaryTitle")}</span>
         </span>
       ),
-      secondary: "Branding & Ambience",
+      secondary: t("prv_branding"),
     },
     {
       step: 3,
       icon: FolderTree,
-      primary: `${categories.length} Categories`,
+      primary: t("prv_categories", { n: categories.length }),
       secondary: categories.map((c) => c.name).slice(0, 2).join(", "),
     },
     {
       step: 4,
       icon: Utensils,
-      primary: `${products.length} Menu Items`,
-      secondary: "Active dishes & beverages",
+      primary: t("prv_menuItems", { n: products.length }),
+      secondary: t("prv_menuItemsSub"),
     },
   ];
 
@@ -99,7 +101,7 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
 
           <span className="text-[10px] uppercase font-mono tracking-wider px-2.5 py-0.5 rounded-full font-medium inline-flex items-center gap-1.5 border self-start sm:self-center bg-white/5 text-white/70 border-white/10">
             <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
-            Draft Preview Ready
+            {t("prv_draftReady")}
           </span>
         </div>
       </div>
@@ -111,16 +113,16 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
           <div className="p-5 rounded-xl bg-[#0D0D0D] border border-white/10 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-mono tracking-widest text-white/40">
-                Menu Status
+                {t("prv_menuStatus")}
               </span>
               <span className="text-[10px] uppercase font-mono tracking-wider px-2.5 py-0.5 rounded-full font-medium inline-flex items-center gap-1.5 border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Ready to Publish
+                {t("prv_ready")}
               </span>
             </div>
 
             <div>
-              <p className="text-xs text-white/40">Scan Link</p>
+              <p className="text-xs text-white/40">{t("prv_scanLink")}</p>
               <div className="mt-1.5 flex items-center justify-between p-2.5 rounded-lg bg-[#111111] border border-white/10 text-xs font-mono">
                 <span className="text-white/90 truncate pr-2">
                   {restaurantName
@@ -131,7 +133,7 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
                   type="button"
                   onClick={handleCopy}
                   className="text-white/40 hover:text-white p-1 hover:bg-white/5 rounded-full transition-colors cursor-pointer shrink-0"
-                  title="Copy menu URL"
+                  title={t("prv_copyUrl")}
                 >
                   {copiedUrl ? (
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -146,7 +148,7 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
           {/* Onboarding Checklist */}
           <div className="p-5 rounded-xl bg-[#0D0D0D] border border-white/10 space-y-4">
             <h3 className="text-xs uppercase tracking-widest font-mono text-white/60">
-              Onboarding Checklist
+              {t("prv_heading")}
             </h3>
 
             <div className="divide-y divide-white/5 text-xs">
@@ -166,7 +168,7 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
                     onClick={() => onJumpToStep(item.step)}
                     className="text-white/40 hover:text-white text-xs font-mono uppercase tracking-wider cursor-pointer shrink-0"
                   >
-                    Edit
+                    {t("prv_edit")}
                   </button>
                 </div>
               ))}
@@ -175,11 +177,11 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
 
           {/* Guide */}
           <div className="p-4 rounded-xl bg-[#0D0D0D] border border-white/10 text-xs space-y-2">
-            <p className="font-medium text-white">Interactive Mobile Simulator</p>
+            <p className="font-medium text-white">{t("prv_simTitle")}</p>
             <ul className="text-white/40 space-y-1.5 list-disc list-inside">
-              <li>Try the search bar and filter categories with the pill tags</li>
-              <li>Your brand accent colors every call-to-action</li>
-              <li>Prices format as Tunisian Dinars (DT) automatically</li>
+              <li>{t("prv_guide1")}</li>
+              <li>{t("prv_guide2")}</li>
+              <li>{t("prv_guide3")}</li>
             </ul>
           </div>
 
@@ -187,20 +189,20 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
           <div className="pt-2 flex items-center gap-3">
             <Button type="button" variant="outline" onClick={onBack}>
               <ArrowLeft className="w-4 h-4" />
-              Back to Products
+              {t("prv_back")}
             </Button>
 
             {finished ? (
               <Link href="/dashboard">
                 <Button type="button" className="font-bold text-xs">
-                  Go to Dashboard
+                  {t("prv_dashboard")}
                   <ArrowRight className="w-3.5 h-3.5 text-black" />
                 </Button>
               </Link>
             ) : (
               <Button type="button" onClick={handleFinish} className="font-bold text-xs">
                 <CloudUpload className="w-3.5 h-3.5 text-black" />
-                Finish Setup
+                {t("prv_finish")}
               </Button>
             )}
           </div>
@@ -208,11 +210,9 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
           <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-white/10 p-4">
             <Info className="w-4 h-4 mt-0.5 text-white/40 shrink-0" />
             <div className="text-xs text-white/40 leading-relaxed">
-              <p className="font-medium text-white/80 mb-1">What happens next?</p>
+              <p className="font-medium text-white/80 mb-1">{t("prv_nextTitle")}</p>
               <p>
-                From the Owner Dashboard you can generate a unique QR code for every table,
-                print them, invite workers, and watch orders arrive in real time. Your menu
-                is synced to the cloud as you edit — scan the menu link above on any phone.
+                {t("prv_nextDesc")}
               </p>
             </div>
           </div>

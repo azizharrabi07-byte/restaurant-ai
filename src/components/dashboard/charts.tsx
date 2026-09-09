@@ -1,5 +1,7 @@
+"use client";
+
 import { hexToRgba } from "@/lib/utils";
-import { formatDT } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 export interface ChartPoint {
   hour: string;
@@ -51,15 +53,17 @@ export function RevenueChart({
   data: ChartPoint[];
   brandColor: string;
 }) {
+  const { formatPrice } = useI18n();
   return (
     <BarChart
       data={data}
       color={brandColor}
-      label={(v) => formatDT(v)}
+      label={(v) => formatPrice(v)}
     />
   );
 }
 
 export function OrdersByHourChart({ data }: { data: ChartPoint[] }) {
-  return <BarChart data={data} color="#9CA3AF" label={(v) => `${v} orders`} />;
+  const { t } = useI18n();
+  return <BarChart data={data} color="#9CA3AF" label={(v) => `${v} ${v === 1 ? t("ov_orderOne") : t("ov_orders")}`} />;
 }

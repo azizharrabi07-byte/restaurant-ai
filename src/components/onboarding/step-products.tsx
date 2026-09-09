@@ -23,8 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { useI18n } from "@/lib/i18n";
 import { type Product } from "@/lib/constants";
-import { formatDT } from "@/lib/format";
 import { StepHeading } from "@/components/onboarding/step-heading";
 
 interface ProductFormProps {
@@ -35,6 +35,7 @@ interface ProductFormProps {
 
 function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
   const { categories } = useOnboarding();
+  const { t } = useI18n();
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [price, setPrice] = useState(initial?.price?.toString() ?? "");
@@ -60,10 +61,10 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
     <form onSubmit={handleSubmit} className="space-y-5">
       <div>
         <label className="text-[11px] uppercase tracking-widest text-white/60 font-medium block mb-1.5">
-          Product Name *
+          {t("spl_nameLabel")}
         </label>
         <Input
-          placeholder="e.g. Double Burger, Mint Tea..."
+          placeholder={t("spl_namePh")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
@@ -72,10 +73,10 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
 
       <div>
         <label className="text-[11px] uppercase tracking-widest text-white/60 font-medium block mb-1.5">
-          Description
+          {t("spl_descLabel")}
         </label>
         <Textarea
-          placeholder="A one-line description guests see under the item name."
+          placeholder={t("spl_descPh")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
@@ -84,13 +85,13 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
 
       <div>
         <label className="text-[11px] uppercase tracking-widest text-white/60 font-medium block mb-1.5">
-          Price (DT) *
+          {t("spl_priceLabel")}
         </label>
         <Input
           type="number"
           step="0.001"
           min="0"
-          placeholder="0.000"
+          placeholder={t("spl_pricePh")}
           value={price}
           onChange={(e) => setPrice(e.target.value)}
         />
@@ -99,11 +100,11 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
       {categories.length > 0 && (
         <div>
           <label className="text-[11px] uppercase tracking-widest text-white/60 font-medium block mb-1.5">
-            Category
+            {t("spl_categoryLabel")}
           </label>
           <Select value={categoryId} onValueChange={setCategoryId}>
             <SelectTrigger>
-              <SelectValue placeholder="Select a category" />
+              <SelectValue placeholder={t("spl_categoryPh")} />
             </SelectTrigger>
             <SelectContent>
               {categories.map((c) => (
@@ -118,11 +119,9 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
 
       <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
         <div>
-          <p className="text-xs font-medium text-white">Availability</p>
+          <p className="text-xs font-medium text-white">{t("spl_availTitle")}</p>
           <p className="text-[11px] text-white/40">
-            {available
-              ? "Guests can see and order this item."
-              : "Hidden from guests until you turn it back on."}
+            {available ? t("spl_availOn") : t("spl_availOff")}
           </p>
         </div>
         <button
@@ -136,7 +135,7 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
           )}
         >
           {available ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-          {available ? "Available" : "Hidden"}
+          {available ? t("spl_available") : t("spl_hidden")}
         </button>
       </div>
 
@@ -144,15 +143,15 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
         value={image}
         onChange={setImage}
         shape="wide"
-        label="Product Image (optional)"
+        label={t("spl_imageLabel")}
       />
 
       <DialogFooter className="gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
+          {t("spl_cancel")}
         </Button>
         <Button type="submit" disabled={!name.trim() || !price || !categoryId}>
-          {initial ? "Save Changes" : "Add Product"}
+          {initial ? t("spl_save") : t("spl_add")}
         </Button>
       </DialogFooter>
     </form>
@@ -161,6 +160,7 @@ function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
 
 export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
   const { categories, products, addProduct, updateProduct, removeProduct } = useOnboarding();
+  const { t, formatPrice } = useI18n();
 
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -171,14 +171,14 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
     ? products.filter((p) => p.categoryId === activeCategoryId)
     : products;
 
-  const getCategoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? "Menu";
+  const getCategoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? t("spl_menuFallback");
 
   return (
     <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
         eyebrow={headingEyebrow ?? "Step 04 · Products"}
-        title="Add your signature dishes"
-        description="Add your dishes, drinks, or services with their prices in Tunisian Dinars."
+        title={t("sp_title")}
+        description={t("sp_desc")}
       >
         <Button
           type="button"
@@ -187,16 +187,16 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
           className="shrink-0"
         >
           <Plus className="w-4 h-4" />
-          Add Product
+          {t("sp_add")}
         </Button>
       </StepHeading>
 
       {categories.length === 0 ? (
         <div className="bg-[#0D0D0D] border border-white/10 rounded-xl p-8 text-center">
           <UtensilsCrossed className="w-10 h-10 text-white/20 mx-auto mb-3" />
-          <h3 className="text-lg font-serif italic text-white">Create categories first</h3>
+          <h3 className="text-lg font-serif italic text-white">{t("sp_noCatTitle")}</h3>
           <p className="text-xs text-white/40 max-w-sm mx-auto mt-1">
-            Head back to Step 3 to set up menu sections, then add dishes here.
+            {t("sp_noCatDesc")}
           </p>
         </div>
       ) : (
@@ -214,7 +214,7 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
               )}
               style={activeCategoryId === null ? { backgroundColor: "rgba(255,255,255,0.9)" } : {}}
             >
-              All ({products.length})
+              {t("sp_all", { n: products.length })}
             </button>
             {categories.map((c) => {
               const count = products.filter((p) => p.categoryId === c.id).length;
@@ -242,13 +242,13 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
           {filtered.length === 0 ? (
             <div className="bg-[#0D0D0D] border border-white/10 rounded-xl p-8 text-center">
               <UtensilsCrossed className="w-10 h-10 text-white/20 mx-auto mb-3" />
-              <h3 className="text-lg font-serif italic text-white">No products yet</h3>
+              <h3 className="text-lg font-serif italic text-white">{t("sp_noProductsTitle")}</h3>
               <p className="text-xs text-white/40 max-w-sm mx-auto mt-1 mb-5">
-                Add dishes, drinks, or services so customers can order from their phone.
+                {t("sp_noProductsDesc")}
               </p>
               <Button type="button" onClick={() => setShowAdd(true)}>
                 <Plus className="w-4 h-4" />
-                Add Your First Product
+                {t("sp_addFirst")}
               </Button>
             </div>
           ) : (
@@ -279,7 +279,7 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
                         <h4 className="text-xs font-medium text-white truncate">{p.name}</h4>
                         {!p.isAvailable && (
                           <span className="text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                            Hidden
+                            {t("sp_hidden")}
                           </span>
                         )}
                       </div>
@@ -290,7 +290,7 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
                         {getCategoryName(p.categoryId)}
                       </span>
                     </div>
-                    <span className="text-xs font-mono text-white font-bold">{formatDT(p.price)}</span>
+                    <span className="text-xs font-mono text-white font-bold">{formatPrice(p.price)}</span>
                   </div>
 
                   <div className="flex flex-col justify-center gap-1 shrink-0">
@@ -298,7 +298,7 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
                       type="button"
                       onClick={() => setEditId(p.id)}
                       className="p-1.5 text-white/40 hover:text-white hover:bg-white/5 rounded-full transition-colors cursor-pointer"
-                      title="Edit Product"
+                      title={t("sp_editTitle")}
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
@@ -306,7 +306,7 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
                       type="button"
                       onClick={() => setDeleteId(p.id)}
                       className="p-1.5 text-white/40 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors cursor-pointer"
-                      title="Delete Product"
+                      title={t("sp_deleteTitle")}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -322,9 +322,9 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Product</DialogTitle>
+            <DialogTitle>{t("spp_dlgAdd")}</DialogTitle>
             <DialogDescription>
-              Fill in the details below. Prices are stored as Tunisian Dinars (DT).
+              {t("spp_dlgAddDesc")}
             </DialogDescription>
           </DialogHeader>
           <ProductForm
@@ -341,8 +341,8 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
       <Dialog open={!!editId} onOpenChange={(o) => !o && setEditId(null)}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Product</DialogTitle>
-            <DialogDescription>Update the product details below.</DialogDescription>
+            <DialogTitle>{t("spp_dlgEdit")}</DialogTitle>
+            <DialogDescription>{t("spp_dlgEditDesc")}</DialogDescription>
           </DialogHeader>
           {editId && (
             <ProductForm
@@ -361,14 +361,14 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
       <Dialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Product</DialogTitle>
+            <DialogTitle>{t("spp_dlgDeleteTitle")}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this product? This action cannot be undone.
+              {t("spp_dlgDeleteDesc")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteId(null)}>
-              Cancel
+              {t("spl_cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -377,7 +377,7 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
                 setDeleteId(null);
               }}
             >
-              Delete
+              {t("spp_delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

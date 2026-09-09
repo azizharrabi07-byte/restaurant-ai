@@ -19,6 +19,8 @@ const mapOrder = (order: Record<string, unknown>, items: { name: string; qty: nu
   status: (order.status as string) ?? "pending",
   isPaid: Boolean(order.is_paid),
   total: Number(order.total ?? 0),
+  acceptedBy: order.accepted_by ? (order.accepted_by as string) : null,
+  acceptedByName: order.accepted_by_name ? (order.accepted_by_name as string) : null,
   items,
 });
 
@@ -78,15 +80,15 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { slug: string; tableToken: string; items: OrderItemInput[] };
+  let body: { slug: string; tableToken?: string; tableNumber?: number; items: OrderItemInput[] };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
-  const { slug, tableToken, items } = body ?? {};
-  if (!slug || !tableToken || !Array.isArray(items) || items.length === 0) {
+  const { slug, tableToken, tableNumber, items } = body ?? {};
+  if (!slug || !Array.isArray(items) || items.length === 0) {
     return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
@@ -99,13 +101,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ cloud: false, error: "NOT_FOUND" }, { status: 404 });
   }
 
-  const { data: table } = await supabaseAdmin
-    .from("restaurant_tables")
-    .select("id, table_number")
-    .eq("restaurant_id", restaurant.id)
-    .eq("qr_token", tableToken)
-    .single();
-  if (!table) {
+  let tableQueried;
+  if (tableToken) {
+    tableQueried = await supabaseAdmin
+      .from("restaurant_tables")
+      .select("id, table_number")
+      .eq("restaurant_id", restaurant.id)
+      .eq("qr_token", tableToken)
+      .single();
+  } else if (typeof tableNumber === "number") {
+    tableQueried = await supabaseAdmin
+      .from("restaurant_tables")
+      .select("id, table_number")
+      .eq("restaurant_id", restaurant.id)
+      .eq("table_number", tableNumber)
+      .single();
+  } else {
+    return NextResponse.json({ cloud: false, error: "BAD_TABLE" }, { status: 404 });
+  }
+  const table = tableQueried.data as
+    | { id: string; table_number: number }
+    | null
+    | undefined;
+  if (tableQueried.error || !table) {
     return NextResponse.json({ cloud: false, error: "BAD_TABLE" }, { status: 404 });
   }
 

@@ -1,6 +1,8 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { BellRing, Plus } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { useOrders } from "@/lib/use-orders";
 import { cn } from "@/lib/utils";
@@ -9,6 +11,8 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { OrderCard } from "@/components/dashboard/order-card";
 import { OrderStatusPill } from "@/components/dashboard/orders-status-pill";
 import { NewOrderAlerts } from "@/components/dashboard/new-order-alerts";
+import { WorkerNewOrderDialog } from "@/components/dashboard/worker-new-order";
+import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 
 const COLUMNS: {
@@ -42,18 +46,42 @@ const COLUMNS: {
 ];
 
 export default function WorkerDashboardPage() {
-  const { restaurantName } = useOnboarding();
+  const { restaurantName, workerSession } = useOnboarding();
   const { orders, acceptOrder, markOrderPaid } = useOrders();
   const { t } = useI18n();
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission | null>(null);
+
   const venue = restaurantName || "Velvet & Stone Coffee";
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined") setNotifPerm(Notification.permission);
+  }, []);
+
+  const enableNotifications = useCallback(() => {
+    if (typeof Notification === "undefined") return;
+    Notification.requestPermission().then((p) => {
+      setNotifPerm(p);
+      if (p === "granted")
+        toast.success(t("nd_on"), { description: t("nd_onDesc") });
+    });
+  }, [t]);
+
+  // Orders accepted by another worker disappear from this worker's board.
+  const isEngagedByOther = (order: { acceptedBy?: string | null }) =>
+    Boolean(order.acceptedBy && workerSession && order.acceptedBy !== workerSession.id);
 
   const byStatus = (status: OrderStatus) =>
     [...orders]
       .filter((o) => o.status === status)
+      .filter((o) => !(status === "accepted" && isEngagedByOther(o)))
       .sort((a, b) => b.number - a.number);
 
   const handleAccept = (id: string) => {
-    acceptOrder(id);
+    acceptOrder(id, {
+      acceptedBy: workerSession?.id ?? undefined,
+      acceptedByName: workerSession?.name ?? undefined,
+    });
     toast.success(t("wd_acceptToast"), { description: t("wd_acceptToastDesc") });
   };
 
@@ -69,7 +97,25 @@ export default function WorkerDashboardPage() {
         eyebrow={t("wk_terminal")}
         title={t("ord_title")}
         description={t("wd_desc", { venue })}
-        actions={<OrderStatusPill />}
+        actions={
+          <>
+            {typeof Notification !== "undefined" && notifPerm === "default" && (
+              <button
+                type="button"
+                onClick={enableNotifications}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-white/10 text-white/60 hover:text-white hover:border-white/25 text-xs font-medium transition-colors cursor-pointer"
+              >
+                <BellRing className="w-3.5 h-3.5" />
+                {t("nd_enable")}
+              </button>
+            )}
+            <Button onClick={() => setNewOrderOpen(true)}>
+              <Plus className="w-4 h-4" />
+              {t("wo_new")}
+            </Button>
+            <OrderStatusPill />
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -123,6 +169,8 @@ export default function WorkerDashboardPage() {
           );
         })}
       </div>
+
+      <WorkerNewOrderDialog open={newOrderOpen} onOpenChange={setNewOrderOpen} />
     </>
   );
 }

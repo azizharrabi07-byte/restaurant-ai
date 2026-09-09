@@ -19,6 +19,7 @@ import {
   type MenuTheme,
   type Product,
   type WorkerRole,
+  type WorkerSession,
 } from "@/lib/constants";
 import {
   MENU_SYNC_KEY,
@@ -27,6 +28,9 @@ import {
   type MenuGetResponse,
   type MenuSyncResult,
 } from "@/lib/menu-mapping";
+import { useI18n } from "@/lib/i18n";
+
+const WORKER_KEY = "sufra.worker";
 
 export type SavingState = "idle" | "saving" | "saved" | "local" | "error";
 
@@ -34,6 +38,8 @@ interface OnboardingCtx extends AppState {
   restaurantId: string | null;
   savingState: SavingState;
   isCloud: boolean;
+  workerSession: WorkerSession | null;
+  setWorkerSession: (w: WorkerSession | null) => void;
   setRestaurantName: (v: string) => void;
   setTagline: (v: string) => void;
   setBusinessType: (v: BusinessType) => void;
@@ -72,7 +78,6 @@ const opsDefaults = {
 };
 
 const INITIAL_FULL: AppState = { ...INITIAL_STATE, ...opsDefaults };
-const DEMO_FULL: AppState = { ...DEMO_STATE, ...opsDefaults };
 
 const hasMenuContent = (s: AppState) =>
   s.restaurantName.trim().length > 0 || s.categories.length > 0 || s.products.length > 0;
@@ -80,15 +85,40 @@ const hasMenuContent = (s: AppState) =>
 // ── Provider ───────────────────────────────────────────────────────
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const [state, set] = useState<AppState>(INITIAL_FULL);
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const [savingState, setSavingState] = useState<SavingState>("idle");
+  const [workerSession, setWorkerSessionState] = useState<WorkerSession | null>(null);
   const hydratedRef = useRef(false);
   const stateRef = useRef<AppState>(state);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Restore the worker identity from local storage once at startup.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(WORKER_KEY);
+      if (raw) {
+        const w = JSON.parse(raw) as WorkerSession;
+        if (w && typeof w.id === "string" && w.id) setWorkerSessionState(w);
+      }
+    } catch {
+      /* corrupted/private mode — ignore */
+    }
+  }, []);
+
+  const setWorkerSession = useCallback((w: WorkerSession | null) => {
+    setWorkerSessionState(w);
+    try {
+      if (w) window.localStorage.setItem(WORKER_KEY, JSON.stringify(w));
+      else window.localStorage.removeItem(WORKER_KEY);
+    } catch {
+      /* private mode */
+    }
+  }, []);
 
   // ── Hydrate from the backend once at startup ─────────────────────
   useEffect(() => {
@@ -337,7 +367,23 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const loadDemo = useCallback(() => set(DEMO_FULL), []);
+  const loadDemo = useCallback(() => {
+    set((s) => ({
+      ...s,
+      ...DEMO_STATE,
+      restaurantName: t("demo_ven"),
+      tagline: t("demo_tag"),
+      categories: DEMO_STATE.categories.map((c, i) => ({
+        ...c,
+        name: t(`demo_cat${i + 1}`),
+      })),
+      products: DEMO_STATE.products.map((p, i) => ({
+        ...p,
+        name: t(`demo_p${i + 1}n`),
+        description: t(`demo_p${i + 1}d`),
+      })),
+    }));
+  }, [t]);
   const resetAll = useCallback(() => set(INITIAL_FULL), []);
 
   // ── Operations: tables ──────────────────────────────────────────
@@ -345,13 +391,19 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     (count: number) =>
       set((s) => {
         const n = Math.max(1, Math.min(40, count));
+        const existing = new Map(s.tables.map((t) => [Number(t.number), t]));
         return {
           ...s,
-          tables: Array.from({ length: n }, (_, i) => ({
-            id: uid(),
-            number: i + 1,
-            token: uid().replace(/-/g, "").slice(0, 8),
-          })),
+          tables: Array.from({ length: n }, (_, i) => {
+            const num = i + 1;
+            const cur = existing.get(num);
+            if (cur) return cur;
+            return {
+              id: uid(),
+              number: num,
+              token: uid().replace(/-/g, "").slice(0, 8),
+            };
+          }),
         };
       }),
     [],
@@ -417,6 +469,9 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           (i) => i.token === token && i.status === "pending",
         );
         if (!invite) return s;
+        const workerId = uid();
+        const workerName = name.trim() || invite.role;
+        setWorkerSession({ id: workerId, name: workerName, role: invite.role });
         return {
           ...s,
           invites: s.invites.map((i) =>
@@ -425,15 +480,15 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           workers: [
             ...s.workers,
             {
-              id: uid(),
-              name: name.trim() || invite.role,
+              id: workerId,
+              name: workerName,
               role: invite.role,
               joinedAt: "Just now",
             },
           ],
         };
       }),
-    [],
+    [setWorkerSession],
   );
   const removeInvite = useCallback(
     (id: string) =>
@@ -453,6 +508,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         restaurantId,
         savingState,
         isCloud,
+        workerSession,
+        setWorkerSession,
         setRestaurantName,
         setTagline,
         setBusinessType,
