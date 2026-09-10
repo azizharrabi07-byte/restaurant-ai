@@ -29,6 +29,7 @@ import {
   type MenuSyncResult,
 } from "@/lib/menu-mapping";
 import { useI18n } from "@/lib/i18n";
+import { mergeMenuImport, type MenuImportResult } from "@/lib/menu-import";
 
 const WORKER_KEY = "sufra.worker";
 
@@ -57,6 +58,7 @@ interface OnboardingCtx extends AppState {
   saveNow: () => Promise<void>;
   loadDemo: () => void;
   resetAll: () => void;
+  importMenuFromScan: (scan: MenuImportResult) => void;
   generateTables: (count: number) => void;
   removeTable: (id: string) => void;
   acceptOrder: (id: string) => void;
@@ -386,6 +388,19 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   }, [t]);
   const resetAll = useCallback(() => set(INITIAL_FULL), []);
 
+  // ── Scan → import into the wizard (canonical whole-menu merge) ─────
+  const importMenuFromScan = useCallback((scan: MenuImportResult) => {
+    set((s) => {
+      const u = uid;
+      const merged = mergeMenuImport(
+        { categories: s.categories, products: s.products },
+        scan,
+        u,
+      );
+      return { ...s, categories: merged.categories, products: merged.products };
+    });
+  }, []);
+
   // ── Operations: tables ──────────────────────────────────────────
   const generateTables = useCallback(
     (count: number) =>
@@ -527,6 +542,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         saveNow,
         loadDemo,
         resetAll,
+        importMenuFromScan,
         generateTables,
         removeTable,
         acceptOrder,

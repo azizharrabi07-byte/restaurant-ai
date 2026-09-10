@@ -308,3 +308,171 @@ ngrok http 5678
 | Phone preview component | `src/components/phone-mockup.tsx` |
 | Brand mark / wordmark | `src/components/brand-logo.tsx` |
 | Owner resolution (server) | `src/lib/supabase-admin.ts` |
+
+---
+
+## 6. Menu scanning (AI photo/PDF → menu) — how it works
+
+The onboarding wizard has a **"Scan your menu"** button (`MenuScanButton` in
+`src/components/onboarding/menu-scan-dialog.tsx`, mounted in
+`step-categories.tsx` and `step-products.tsx`). The flow:
+
+```text
+Browser:  user picks photos/PDFs, client-side prepareUploadFile() → POST /api/menu/scan (FormData: files + venue)
+Server:   upload each file to Mistral Files  →  OCR (markdown + whole-document json_schema annotation)
+          → quality gate (ocr-quality.ts)  →  buildMenuImport(annotation)  [stats.source = "ai"]
+          → parseOcrMarkdown() deterministic parser  [stats.source = "fallback"]
+          → reconcileImports(ai, parser)  →  one MenuImportResult → onboarding store (mergeMenuImport)
+```
+
+Key files:
+
+| File | Role |
+| --- | --- |
+| `src/app/api/menu/scan/route.ts` | Route contract + error→HTTP mapping |
+| `src/lib/menu-scan.ts` | Orchestration: upload, OCR(+retries), parse, reconcile, logs |
+| `src/lib/ocr-quality.ts` | Pure deterministic gate that rejects degraded OCR responses |
+| `src/lib/menu-import.ts` | Pure pipeline: normalize → sanitize → build → reconcile |
+| `src/lib/ocr-quality.test.ts` / `menu-import.test.ts` | Unit tests (72 total) |
+| `src/lib/image-utils.ts` | `prepareUploadFile()` — client-side upload prep |
+| `src/components/onboarding/menu-scan-dialog.tsx` | The scan dialog UI + error display |
+
+Environment: `MISTRAL_API_KEY` (server-only) and optional `MISTRAL_OCR_MODEL`
+(see `.env.example`). **Only Mistral OCR is used — chat completions are never
+called** (the current subscription rate-limits chat completions with 429 code
+1300 while the OCR quota is separate). Structure comes from the OCR endpoint's
+built-in `document_annotation` (`json_schema`, strict) — prices in TND, EUR/USD
+converted approx (1 € ≈ 3.4 DT, 1 $ ≈ 3.1 DT).
+
+Design decisions (do not casually undo):
+
+- **Both extraction paths always run.** The annotation (an LLM) is stochastic and
+  can under-extract; the deterministic parser always runs as a baseline, and
+  `reconcileImports` merges them (union of categories, product identity by
+  normalized name with `name\0category` disambiguation for the same dish in two
+  sections; parser price wins on disagreement; AI spelling wins on names).
+- **Quality gate before annotation/parser.** `assessOcrQuality` flags responses
+  that are near-empty (`EMPTY_TEXT`), have no items (`NO_ITEMS`), have ≥3 item
+  lines but zero headings (`NO_STRUCTURE`), or end mid-section (`TRUNCATED`).
+  It is purely structural — a real 1-category / 2-product menu passes. On a bad
+  response the OCR call re-runs (up to `OCR_QUALITY_ATTEMPTS=3`) on the same
+  file, then throws a typed error. Never import garbage silently.
+- **Never hard-code the restaurant or a category count.** The tests use generic
+  menus, not "Café Aziz".
+- **Pure logic lives in modules free of `"server-only"` and React** so vitest can
+  import them. `menu-scan.ts` is `"server-only"` and is *not* unit-tested.
+
+API contract of `POST /api/menu/scan` — `{ files: File[], venue?: string }` →
+`{ ok: true, result: MenuImportResult }` or `{ ok: false, error, detail }`:
+
+| error | HTTP | Meaning | UI message |
+| --- | --- | --- | --- |
+| `NO_KEY` | 503 | `MISTRAL_API_KEY` not set | ms_error_NO_KEY |
+| `TOO_MANY_FILES` | 400 | 0 or >6 files | ms_error_TOO_MANY_FILES |
+| `FILE_TOO_LARGE` | 413 | > 12 MB | ms_error_FILE_TOO_LARGE |
+| `BAD_TYPE` | 422 | not image/PDF | ms_error_BAD_TYPE |
+| `UPLOAD_FAILED` | 502 | Mistral upload failed | ms_error_OCR_FAILED |
+| `OCR_FAILED` | 502 | OCR degraded/empty after retries | ms_error_OCR_FAILED |
+| `NETWORK` | 502 | `api.mistral.ai` unreachable after 6 tries | ms_error_NETWORK |
+| `RATE_LIMITED` | 429 | HTTP 429 after retries | ms_error_RATE_LIMITED |
+| `EMPTY` | 422 | no dishes/drinks extractable | ms_error_EMPTY |
+
+Messages live in `src/lib/i18n.tsx` (EN/FR/AR) under `ms_error_*`; the dialog maps
+codes via `ERROR_MSG_KEY` in `menu-scan-dialog.tsx`. Add a key to all three
+locales when you add a code.
+
+---
+
+## 7. Troubleshooting — every issue we hit and its fix
+
+> All scanner traces (stage logs, no secrets) go to the **server console** and
+> `.dev.log` / `.dev.err.log` in the project root (git-ignored). Grep
+> `.dev.log` for `FINAL ... categories= aiItems= parserItems=` to see exactly
+> what happened on a scan.
+
+1. **"Scan gives only 1 category (or catches all 4 only once in a while)".**
+   Cause: the old client code downscaled every image to max **800px JPEG q0.82**
+   (`1131×1600 → 566×800`). With such a small re-encode, Mistral returns full
+   markdown but its **annotation comes back `{"categories":[]}`** (~5/6 runs),
+   so the fallback parser alone collapses the result. Fix (done): images already
+   ≤ 2048px are sent **unchanged** via `prepareUploadFile` (only really large
+   photos are downscaled, at q0.9). Verified 10/10 scans return the full 4
+   categories / 20 products. Further down the road, if you see `annotationBytes`
+   of ~18 with good OCR, that's this signature.
+
+2. **Spurious `TypeError: fetch failed` / `ETIMEDOUT` calling `api.mistral.ai`**
+   (bare `node -e fetch()` fails almost always, `curl.exe` usually works, the
+   Next.js route sometimes fails uploads 6× in a row). This machine's route to
+   Mistral is **intermittently dead at the TCP layer and `api.mistral.ai`
+   resolves to unreachable IPv6 addresses** — Node's undici does no Happy
+   Eyeballs. Mitigations applied: `dns.setDefaultResultOrder("ipv4first")` at the
+   top of `menu-scan.ts`, network retry loop in `postWithRetry` (6 attempts,
+   backoff capped at 6s), `429` retried up to 3×, and a **typed `NETWORK` error**
+   instead of leaking a raw `TypeError` as `UNKNOWN`. When testing locally,
+   always call the running app route (`POST localhost:3000/api/menu/scan`),
+   never a standalone fetch script.
+
+3. **Single 1-category run in mid-dev.** Was a transient **degraded OCR**: HTTP
+   200 but only ~3 markdown lines, no headings. Now blocked by the quality gate
+   (re-OCRs up to 3× then `OCR_FAILED`).
+
+4. **`Mistral /v1/ocr → 400` "File could not be found or may have expired"**
+   (code 3310). Mistral file-cache race/expiry on a repeat OCR of the same
+   `file_id`. Transient; a retry of the request succeeds. The retry/backoff loop
+   covers it. If it becomes common, re-upload the document on `3310`.
+
+5. **`POST /api/menu/scan` 500 `UNKNOWN`.** Any non-`MenuScanError` escaping the
+   route. Should no longer happen for transport failures (fixed with NETWORK);
+   if you see one again, the `detail` is the real exception — investigate, don't
+   ignore.
+
+6. **`/login` returns 404.** Intended: this app has no `/login` page
+   (`/` + `/onboarding` are the only public routes relevant here).
+
+7. **Port 3000 not answering after edits.** The dev server can die silently.
+   Restart with logging:
+   `Start-Process cmd -ArgumentList '/c','npm run dev > .dev.log 2> .dev.err.log'`,
+   then check `Get-NetTCPConnection -LocalPort 3000 -State Listen`.
+
+8. **`next lint` prints a deprecation warning.** Next 15 still runs ESLint 8;
+   the warning is expected. `npm run typecheck`, `npm run test`, `npm run lint`
+   all run clean (72 vitest tests).
+
+9. **ngrok is only needed to expose the dev server** (webhooks / real phone).
+   The scanner itself needs no tunnel: browser → `localhost:3000` → Mistral.
+
+---
+
+## 8. For the next developer — getting up to speed fast
+
+- **Run it:** `npm install`, `cp .env.example .env.local` (fill Supabase keys +
+  a real `MISTRAL_API_KEY`), `npm run dev` → http://localhost:3000.
+- **Verify a scan end-to-end without the UI:**
+  `POST http://localhost:3000/api/menu/scan` with `FormData` fields `files`
+  (1 image/PDF) + `venue`. A ready probe lives at
+  `C:\Users\DELL\AppData\Local\Temp\opencode\aziz-route.js` (uses the real menu
+  photo). Watch `.dev.log` for `OCR QUALITY`, `NETWORK RETRY`,
+  `OCR RESPONSE PARSE`, `FINAL`.
+- **Real menu fixtures used during development** (kept outside the repo because
+  they're user photos): `Downloads\1131w-vQnxH5Nxwgc.webp` is **the production
+  menu** — 4 categories **Coffee / Non Coffee / Pastries / Add-ons**, 20
+  products (dollar prices). `cafe-menu-photo.png` is a *different* 3-category
+  fixture (Coffees / Salades / Sandwiches) — do not confuse the two. If a scan
+  "regresses to 3 categories", it's using the wrong photo.
+- **Unit tests:** `npm test` (`vitest run`) — `src/lib/menu-import.test.ts` (58)
+  and `src/lib/ocr-quality.test.ts` (14). Keep them green; they encode the
+  reconcile + sanitize + quality-gate rules.
+- **If you touch an error code**, update: the `ScanErrorCode` union in
+  `menu-scan.ts`, the `STATUS` map + `errorFromStatus` in `route.ts`,
+  `ERROR_MSG_KEY` in `menu-scan-dialog.tsx`, and the `ms_error_*` keys in all
+  three locales of `src/lib/i18n.tsx`.
+- **If you change OCR tuning**, look at `OCR_QUALITY_ATTEMPTS`,
+  `MAX_PAGES_PER_FILE`, and `ocr-quality.ts` thresholds
+  (`MIN_NON_WS_CHARS=8`, `MIN_ITEMS_FOR_STRUCTURE=3`).
+- **Product reality to respect:** owner is building a Tunisian café menu; prices
+  in scanner annotations arrive in TND by design. Do **not** hard-code the
+  restaurant name, the 4 categories, or any fixture file into the pipeline — the
+  tests will (rightly) call that out.
+- **The 1-category bug has cost real time — before "fixing" a scan result again,
+  reproduce with the actual user photo through the live route and read the
+  `FINAL` line.**

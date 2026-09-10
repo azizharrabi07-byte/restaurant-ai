@@ -26,6 +26,7 @@ import { useOnboarding } from "@/lib/onboarding-store";
 import { useI18n } from "@/lib/i18n";
 import { type Product } from "@/lib/constants";
 import { StepHeading } from "@/components/onboarding/step-heading";
+import { MenuScanButton } from "@/components/onboarding/menu-scan-dialog";
 
 interface ProductFormProps {
   initial?: Product;
@@ -180,15 +181,18 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
         title={t("sp_title")}
         description={t("sp_desc")}
       >
-        <Button
-          type="button"
-          onClick={() => setShowAdd(true)}
-          disabled={categories.length === 0}
-          className="shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          {t("sp_add")}
-        </Button>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <MenuScanButton />
+          <Button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            disabled={categories.length === 0}
+            className="shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            {t("sp_add")}
+          </Button>
+        </div>
       </StepHeading>
 
       {categories.length === 0 ? (

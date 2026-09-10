@@ -24,6 +24,7 @@ import { useOnboarding } from "@/lib/onboarding-store";
 import { useI18n } from "@/lib/i18n";
 import { type Category } from "@/lib/constants";
 import { StepHeading } from "@/components/onboarding/step-heading";
+import { MenuScanButton } from "@/components/onboarding/menu-scan-dialog";
 
 const CAFE_PRESETS = ["pre_c1", "pre_c2", "pre_c3", "pre_c4"];
 
@@ -85,10 +86,13 @@ export function StepCategories({ headingEyebrow }: { headingEyebrow?: string }) 
         title={t("ca_title")}
         description={t("ca_desc")}
       >
-        <Button type="button" onClick={openCreate} className="shrink-0">
-          <Plus className="w-4 h-4" />
-          {t("ca_add")}
-        </Button>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <MenuScanButton />
+          <Button type="button" onClick={openCreate}>
+            <Plus className="w-4 h-4" />
+            {t("ca_add")}
+          </Button>
+        </div>
       </StepHeading>
 
       <div className="space-y-4">
@@ -100,6 +104,7 @@ export function StepCategories({ headingEyebrow }: { headingEyebrow?: string }) 
               {t("ca_emptyDesc")}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <MenuScanButton />
               <Button type="button" onClick={openCreate}>
                 <Plus className="w-4 h-4" />
                 {t("ca_createCustom")}
