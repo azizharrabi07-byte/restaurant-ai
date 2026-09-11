@@ -3,23 +3,35 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { Button } from "@/components/ui/button";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Sparkles, UserRound } from "lucide-react";
 
 interface OrderCardProps {
   order: Order;
   onAccept?: (id: string) => void;
   onPaid?: (id: string) => void;
   className?: string;
+  acceptedByMe?: boolean;
+  /** When true the card is dimmed (claimed by another worker). */
+  muted?: boolean;
 }
 
-export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps) {
+export function OrderCard({
+  order,
+  onAccept,
+  onPaid,
+  className,
+  acceptedByMe,
+  muted,
+}: OrderCardProps) {
   const { t, plural, formatPrice } = useI18n();
   const totalQty = order.items.reduce((sum, i) => sum + i.qty, 0);
 
   return (
     <div
       className={cn(
-        "rounded-xl border border-white/10 bg-[#0D0D0D] p-4 sm:p-5 space-y-4 animate-fade-up",
+        "rounded-xl border border-white/10 bg-[#0D0D0D] p-4 sm:p-5 space-y-4 animate-fade-up transition-opacity duration-300",
+        muted && "opacity-55 pointer-events-none",
+        acceptedByMe && "ring-1 ring-emerald-400/30",
         className,
       )}
     >
@@ -38,6 +50,30 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
         </div>
         <StatusBadge status={order.status} />
       </div>
+
+      {/* Claim line — who accepted this order */}
+      {order.status === "accepted" && order.acceptedByName && (
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-mono",
+            acceptedByMe
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+              : "border-white/10 bg-white/[0.03] text-white/60",
+          )}
+        >
+          <UserRound className="w-3 h-3 shrink-0" />
+          <span className="truncate">
+            {acceptedByMe
+              ? t("oc_acceptedByYou")
+              : t("oc_acceptedBy", { name: order.acceptedByName })}
+          </span>
+          {order.acceptedAt && (
+            <span className="ml-auto text-white/40 shrink-0">
+              {order.acceptedAt}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-1.5">
         {order.items.map((item, i) => (
@@ -64,7 +100,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
 
       {(onAccept || onPaid) && (
         <div className="flex items-center gap-2">
-          {order.status === "pending" && onAccept && (
+          {order.status === "pending" && onAccept && !muted && (
             <Button
               type="button"
               size="sm"
@@ -75,7 +111,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               {t("oc_accept")}
             </Button>
           )}
-          {order.status === "accepted" && onPaid && (
+          {order.status === "accepted" && onPaid && acceptedByMe && (
             <Button
               type="button"
               size="sm"
@@ -86,6 +122,11 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               <Check className="w-3.5 h-3.5 text-emerald-400" />
               {t("oc_markPaid")}
             </Button>
+          )}
+          {order.status === "accepted" && onPaid && !acceptedByMe && (
+            <span className="flex-1 text-center text-[11px] font-mono text-white/40 uppercase tracking-wider py-2">
+              {t("oc_claimedByOther")}
+            </span>
           )}
           {order.status === "paid" && (
             <span className="flex-1 text-center text-[11px] font-mono text-emerald-400/80 uppercase tracking-wider">

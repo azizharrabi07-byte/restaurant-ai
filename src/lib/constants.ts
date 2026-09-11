@@ -80,6 +80,7 @@ export function isMenuTheme(value: unknown): value is MenuTheme {
 
 export interface OnboardingState {
   restaurantName: string;
+  restaurantSlug: string;
   tagline: string;
   businessType: BusinessType;
   logo: string | null;
@@ -108,6 +109,9 @@ export interface Order {
   hour: number;
   status: OrderStatus;
   isPaid: boolean;
+  acceptedBy: string | null;
+  acceptedByName: string | null;
+  acceptedAt: string | null;
   items: OrderItem[];
   total: number;
 }
@@ -210,6 +214,7 @@ export const COVER_PRESETS: CoverPreset[] = [
 
 export const INITIAL_STATE: OnboardingState = {
   restaurantName: "",
+  restaurantSlug: "",
   tagline: "",
   businessType: "cafe",
   logo: null,
@@ -227,6 +232,7 @@ const CAT_BRUN = "10000000-0000-4000-8000-000000000004";
 
 export const DEMO_STATE: OnboardingState = {
   restaurantName: "Velvet & Stone Coffee",
+  restaurantSlug: "velvet-stone-coffee",
   tagline: "Single-origin coffee, slow mornings, warm corners.",
   businessType: "cafe",
   logo: LOGO_PRESETS[0]?.url ?? null,

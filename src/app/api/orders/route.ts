@@ -8,19 +8,45 @@ interface OrderItemInput {
   qty: number;
 }
 
-const mapOrder = (order: Record<string, unknown>, items: { name: string; qty: number; price: number }[]) => ({
-  id: order.id as string,
-  number: order.daily_order_number as number,
-  placedAt: new Date(order.created_at as string).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  hour: new Date(order.created_at as string).getHours(),
-  status: (order.status as string) ?? "pending",
-  isPaid: Boolean(order.is_paid),
-  total: Number(order.total ?? 0),
-  items,
-});
+type OrderCreateBody = {
+  // Guest path:
+  slug?: string;
+  tableToken?: string;
+  // Worker terminal path:
+  tableId?: string;
+  items: OrderItemInput[];
+};
+
+const safe = (v: unknown): string | null => {
+  if (v === null || v === undefined) return null;
+  return typeof v === "string" ? v : null;
+};
+
+const mapOrder = (order: Record<string, unknown>, items: { name: string; qty: number; price: number }[]) => {
+  const acceptedAtRaw = order.accepted_at;
+  return {
+    id: order.id as string,
+    number: order.daily_order_number as number,
+    placedAt: new Date(order.created_at as string).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    acceptedAt:
+      acceptedAtRaw && typeof acceptedAtRaw === "string"
+        ? new Date(acceptedAtRaw).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : null,
+    hour: new Date(order.created_at as string).getHours(),
+    status: (order.status as string) ?? "pending",
+    isPaid: Boolean(order.is_paid),
+    acceptedBy: safe(order.accepted_by),
+    acceptedByName: safe(order.accepted_by_name),
+    total: Number(order.total ?? 0),
+    items,
+  };
+};
 
 export async function GET() {
   if (!supabaseAdmin) {
@@ -78,35 +104,71 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { slug: string; tableToken: string; items: OrderItemInput[] };
+  let body: OrderCreateBody;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
-  const { slug, tableToken, items } = body ?? {};
-  if (!slug || !tableToken || !Array.isArray(items) || items.length === 0) {
+  const { slug, tableToken, tableId, items } = body ?? {};
+  if (!Array.isArray(items) || items.length === 0) {
     return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
-  const { data: restaurant } = await supabaseAdmin
-    .from("restaurants")
-    .select("id")
-    .eq("slug", slug)
-    .single();
-  if (!restaurant) {
-    return NextResponse.json({ cloud: false, error: "NOT_FOUND" }, { status: 404 });
-  }
+  let resolvedRestaurantId: string | null = null;
+  let resolvedTable: { id: string; table_number: number } | null = null;
 
-  const { data: table } = await supabaseAdmin
-    .from("restaurant_tables")
-    .select("id, table_number")
-    .eq("restaurant_id", restaurant.id)
-    .eq("qr_token", tableToken)
-    .single();
-  if (!table) {
-    return NextResponse.json({ cloud: false, error: "BAD_TABLE" }, { status: 404 });
+  if (slug && tableToken) {
+    // Guest flow: look up by slug + qr token (same as scanning a code)
+    const { data: restaurant } = await supabaseAdmin
+      .from("restaurants")
+      .select("id")
+      .eq("slug", slug)
+      .single();
+    if (!restaurant) {
+      return NextResponse.json({ cloud: false, error: "NOT_FOUND" }, { status: 404 });
+    }
+    const { data: table } = await supabaseAdmin
+      .from("restaurant_tables")
+      .select("id, table_number")
+      .eq("restaurant_id", restaurant.id)
+      .eq("qr_token", tableToken)
+      .single();
+    if (!table) {
+      return NextResponse.json({ cloud: false, error: "BAD_TABLE" }, { status: 404 });
+    }
+    resolvedRestaurantId = restaurant.id;
+    resolvedTable = table;
+  } else if (tableId) {
+    // Worker terminal flow: order is being placed for a table by staff
+    const ownerId = await resolveOwnerUserId();
+    if (!ownerId) {
+      return NextResponse.json({ cloud: false, error: "NO_OWNER" }, { status: 503 });
+    }
+    const { data: restaurants } = await supabaseAdmin
+      .from("restaurants")
+      .select("id")
+      .eq("owner_id", ownerId)
+      .order("created_at", { ascending: true })
+      .limit(1);
+    const restaurantId = restaurants?.[0]?.id as string | undefined;
+    if (!restaurantId) {
+      return NextResponse.json({ cloud: false, error: "NO_RESTAURANT" }, { status: 404 });
+    }
+    const { data: table } = await supabaseAdmin
+      .from("restaurant_tables")
+      .select("id, table_number")
+      .eq("id", tableId)
+      .eq("restaurant_id", restaurantId)
+      .single();
+    if (!table) {
+      return NextResponse.json({ cloud: false, error: "BAD_TABLE" }, { status: 404 });
+    }
+    resolvedRestaurantId = restaurantId;
+    resolvedTable = table;
+  } else {
+    return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
   const today = new Date();
@@ -118,17 +180,18 @@ export async function POST(req: Request) {
   const { data: lastToday } = await supabaseAdmin
     .from("orders")
     .select("daily_order_number")
-    .eq("restaurant_id", restaurant.id)
+    .eq("restaurant_id", resolvedRestaurantId)
     .gte("created_at", dayStart)
     .order("daily_order_number", { ascending: false })
     .limit(1);
-  const nextNumber = (lastToday?.[0]?.daily_order_number as number) ?? 1000 + 1;
+  const lastNumber = (lastToday?.[0]?.daily_order_number as number) ?? 1000;
+  const nextNumber = lastNumber + 1;
 
   const { data: order, error: oErr } = await supabaseAdmin
     .from("orders")
     .insert({
-      restaurant_id: restaurant.id,
-      table_id: table.id,
+      restaurant_id: resolvedRestaurantId,
+      table_id: resolvedTable!.id,
       status: "pending",
       total,
       daily_order_number: nextNumber,
@@ -163,12 +226,15 @@ export async function POST(req: Request) {
     order: {
       id: order.id,
       number: order.daily_order_number,
-      table: table.table_number,
+      table: resolvedTable!.table_number,
       placedAt: new Date(order.created_at as string).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
       }),
+      acceptedAt: null,
       status: "pending",
+      acceptedBy: null,
+      acceptedByName: null,
       items: sorted.map((i) => ({ name: i.name, qty: i.qty, price: i.price })),
       total,
     },

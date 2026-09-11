@@ -35,6 +35,7 @@ interface OnboardingCtx extends AppState {
   savingState: SavingState;
   isCloud: boolean;
   setRestaurantName: (v: string) => void;
+  setRestaurantSlug: (v: string) => void;
   setTagline: (v: string) => void;
   setBusinessType: (v: BusinessType) => void;
   setLogo: (v: string | null) => void;
@@ -51,10 +52,15 @@ interface OnboardingCtx extends AppState {
   saveNow: () => Promise<void>;
   loadDemo: () => void;
   resetAll: () => void;
-  generateTables: (count: number) => void;
+  generateTables: (count: number, preserve?: boolean) => void;
+  regenerateAllTables: (count: number) => void;
   removeTable: (id: string) => void;
   acceptOrder: (id: string) => void;
   markOrderPaid: (id: string) => void;
+  createWorkerOrder: (
+    tableId: string,
+    items: { productId: string; name: string; price: number; qty: number }[],
+  ) => void;
   createInvite: (role: WorkerRole, token: string) => void;
   acceptInvite: (token: string, name: string) => void;
   removeInvite: (id: string) => void;
@@ -75,7 +81,10 @@ const INITIAL_FULL: AppState = { ...INITIAL_STATE, ...opsDefaults };
 const DEMO_FULL: AppState = { ...DEMO_STATE, ...opsDefaults };
 
 const hasMenuContent = (s: AppState) =>
-  s.restaurantName.trim().length > 0 || s.categories.length > 0 || s.products.length > 0;
+  s.restaurantName.trim().length > 0 ||
+  s.categories.length > 0 ||
+  s.products.length > 0 ||
+  s.tables.length > 0;
 
 // ── Provider ───────────────────────────────────────────────────────
 
@@ -104,6 +113,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           set((s) => ({
             ...s,
             restaurantName: data.restaurant!.name,
+            restaurantSlug: data.restaurant!.slug,
             tagline: data.restaurant!.tagline,
             businessType: (data.restaurant!.businessType || "cafe") as BusinessType,
             logo: data.restaurant!.logoUrl,
@@ -134,6 +144,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
                 set((s) => ({
                   ...s,
                   restaurantName: saved.restaurant!.name,
+                  restaurantSlug: saved.restaurant!.slug ?? "",
                   tagline: saved.restaurant!.tagline ?? "",
                   businessType: (saved.restaurant!.businessType || "cafe") as BusinessType,
                   logo: saved.restaurant!.logoUrl,
@@ -226,6 +237,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   // ── Restaurant identity ───────────────────────────────────────────
   const setRestaurantName = useCallback(
     (restaurantName: string) => set((s) => ({ ...s, restaurantName })),
+    [],
+  );
+  const setRestaurantSlug = useCallback(
+    (restaurantSlug: string) => set((s) => ({ ...s, restaurantSlug })),
     [],
   );
   const setTagline = useCallback(
@@ -341,20 +356,46 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const resetAll = useCallback(() => set(INITIAL_FULL), []);
 
   // ── Operations: tables ──────────────────────────────────────────
+  // When preserve is true (default), existing tables keep their id+token
+  // so printed QR codes continue to work; only adds/removes to reach the
+  // requested count. Pass preserve=false to force full regeneration
+  // (e.g. when the owner explicitly asks to re-issue QR codes).
   const generateTables = useCallback(
-    (count: number) =>
+    (count: number, preserve = true) =>
       set((s) => {
         const n = Math.max(1, Math.min(40, count));
-        return {
-          ...s,
-          tables: Array.from({ length: n }, (_, i) => ({
+        if (!preserve || s.tables.length === 0) {
+          return {
+            ...s,
+            tables: Array.from({ length: n }, (_, i) => ({
+              id: uid(),
+              number: i + 1,
+              token: uid().replace(/-/g, "").slice(0, 8),
+            })),
+          };
+        }
+        // Preserve existing tokens: keep existing, pad or trim to reach n.
+        const existing = [...s.tables].sort((a, b) => a.number - b.number);
+        const kept = existing.slice(0, n).map((t, i) => ({
+          ...t,
+          number: i + 1,
+        }));
+        while (kept.length < n) {
+          kept.push({
             id: uid(),
-            number: i + 1,
+            number: kept.length + 1,
             token: uid().replace(/-/g, "").slice(0, 8),
-          })),
-        };
+          });
+        }
+        return { ...s, tables: kept };
       }),
     [],
+  );
+  const regenerateAllTables = useCallback(
+    (count: number) => {
+      generateTables(count, false);
+    },
+    [generateTables],
   );
   const removeTable = useCallback(
     (id: string) =>
@@ -366,6 +407,42 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   );
 
   // ── Operations: orders ──────────────────────────────────────────
+  const createWorkerOrder = useCallback(
+    (
+      tableId: string,
+      items: { productId: string; name: string; price: number; qty: number }[],
+    ) =>
+      set((s) => {
+        const tbl = s.tables.find((t) => t.id === tableId);
+        if (!tbl || items.length === 0) return s;
+        const hour = new Date().getHours();
+        const placedAt = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const maxNumber = s.orders.reduce(
+          (m, o) => Math.max(m, o.number),
+          1000,
+        );
+        const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+        const newOrder = {
+          id: uid(),
+          number: maxNumber + 1,
+          table: tbl.number,
+          placedAt,
+          acceptedAt: null,
+          hour,
+          status: "pending" as const,
+          isPaid: false,
+          acceptedBy: null,
+          acceptedByName: null,
+          items: items.map((i) => ({ name: i.name, qty: i.qty, price: i.price })),
+          total,
+        };
+        return { ...s, orders: [newOrder, ...s.orders] };
+      }),
+    [],
+  );
   const acceptOrder = useCallback(
     (id: string) =>
       set((s) => ({
@@ -454,6 +531,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         savingState,
         isCloud,
         setRestaurantName,
+        setRestaurantSlug,
         setTagline,
         setBusinessType,
         setLogo,
@@ -471,9 +549,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         loadDemo,
         resetAll,
         generateTables,
+        regenerateAllTables,
         removeTable,
         acceptOrder,
         markOrderPaid,
+        createWorkerOrder,
         createInvite,
         acceptInvite,
         removeInvite,

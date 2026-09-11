@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { useOrders } from "@/lib/use-orders";
+import { useWorkerIdentity } from "@/lib/worker-identity";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { OrderStatus } from "@/lib/constants";
@@ -21,6 +22,7 @@ const FILTERS: { key: Filter; labelKey: string }[] = [
 
 export default function OrdersPage() {
   const { orders, acceptOrder, markOrderPaid, live } = useOrders();
+  const { worker } = useWorkerIdentity();
   const { t } = useI18n();
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -35,9 +37,18 @@ export default function OrdersPage() {
     paid: orders.filter((o) => o.status === "paid").length,
   };
 
-  const handleAccept = (id: string) => {
-    acceptOrder(id);
-    toast.success(t("ord_acceptToast"), { description: t("ord_acceptToastDesc") });
+  const handleAccept = async (id: string) => {
+    // Owner view acts as "Manager" — uses identity if set, otherwise uses "Manager".
+    const wid = worker?.id ?? "owner";
+    const wname = worker?.name ?? "Manager";
+    const res = await acceptOrder(id, wid, wname);
+    if (!res.claimed) {
+      toast.error(t("wd_takenTitle"), {
+        description: t("wd_takenDesc", { name: res.acceptedBy ?? t("na_coworker") }),
+      });
+    } else {
+      toast.success(t("ord_acceptToast"), { description: t("ord_acceptToastDesc") });
+    }
   };
 
   const handlePaid = (id: string) => {
@@ -84,14 +95,22 @@ export default function OrdersPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              onAccept={handleAccept}
-              onPaid={handlePaid}
-            />
-          ))}
+          {filtered.map((order) => {
+            const isMine =
+              worker !== null
+                ? order.acceptedBy === worker.id
+                : true; // owner can mark anything paid
+            return (
+              <OrderCard
+                key={order.id}
+                order={order}
+                onAccept={handleAccept}
+                onPaid={handlePaid}
+                acceptedByMe={isMine}
+                muted={!isMine && order.status === "accepted"}
+              />
+            );
+          })}
         </div>
       )}
     </>

@@ -76,6 +76,7 @@ export function colorFromHex(hex?: string | null): BrandColor {
 
 export function menuPayloadFromState(state: {
   restaurantName: string;
+  restaurantSlug?: string;
   tagline: string;
   businessType: string;
   logo: string | null;
@@ -94,10 +95,13 @@ export function menuPayloadFromState(state: {
   }[];
   tables: { id: string; number: number; token: string }[];
 }): MenuSyncPayload {
+  const name = state.restaurantName.trim();
+  const computedSlug = slugify(name || "my-cafe");
+  const slug = state.restaurantSlug || computedSlug;
   return {
     restaurant: {
-      name: state.restaurantName.trim(),
-      slug: slugify(state.restaurantName || "my-cafe"),
+      name,
+      slug,
       tagline: state.tagline.trim(),
       businessType: state.businessType,
       logoUrl: state.logo,
