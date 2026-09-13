@@ -16,46 +16,148 @@ import { useI18n } from "@/lib/i18n";
 
 const ROLE_VALUES: string[] = ["Cashier", "Manager"];
 
+interface AcceptResponse {
+  cloud?: boolean;
+  worker?: { id: string; name: string; role: WorkerRole } | null;
+  sessionToken?: string;
+}
+
+interface ServerInviteInfo {
+  role: WorkerRole;
+  restaurantName: string;
+  brandColor: string | null;
+  expiresAt: string | null;
+}
+
 function InviteContent() {
   const params = useParams<{ token: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { invites, acceptInvite, createInvite, restaurantName, brandColor } = useOnboarding();
+  const { invites, acceptInvite, createInvite, restaurantName, brandColor, setWorkerSession } =
+    useOnboarding();
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [accepted, setAccepted] = useState(false);
+  const [serverRejected, setServerRejected] = useState(false);
+  const [working, setWorking] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [serverInvite, setServerInvite] = useState<ServerInviteInfo | null>(null);
+  const [serverChecked, setServerChecked] = useState(false);
+
+  const token = params.token ?? "";
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const token = params.token ?? "";
+  // Authoritative invite lookup: role/name come from the server, never the URL.
+  useEffect(() => {
+    if (!token) {
+      setServerChecked(true);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/auth/worker/invite/${encodeURIComponent(token)}`);
+        if (!alive) return;
+        if (res.ok) {
+          const json = (await res.json()) as {
+            cloud?: boolean;
+            invite?: { role?: string; restaurantName?: string; brandColor?: string | null; expiresAt?: string | null };
+          };
+          if (json.cloud && json.invite && (json.invite.role === "Cashier" || json.invite.role === "Manager")) {
+            setServerInvite({
+              role: json.invite.role,
+              restaurantName: json.invite.restaurantName ?? "",
+              brandColor: json.invite.brandColor ?? null,
+              expiresAt: json.invite.expiresAt ?? null,
+            });
+          }
+        }
+      } catch {
+        /* offline — local demo path below */
+      } finally {
+        if (alive) setServerChecked(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   const roleParam = searchParams.get("role");
   const nameParam = searchParams.get("r");
   const colorParam = searchParams.get("b");
 
   const storeInvite = invites.find((i) => i.token === token);
+  // Legacy local links carry details in the URL (demo mode only). Server
+  // invites never trust URL params.
   const fromUrl = Boolean(roleParam && nameParam);
-  // A QR from the invite dialog carries its details in the URL, so it works on
-  // any device even though state is local. The seeded token falls back to store.
-  const valid = fromUrl || Boolean(storeInvite);
+  const valid = Boolean(serverInvite) || Boolean(storeInvite) || fromUrl;
   const alreadyAccepted = storeInvite?.status === "accepted" || accepted;
 
-  const role: WorkerRole = ROLE_VALUES.includes(roleParam ?? "")
-    ? (roleParam as WorkerRole)
-    : (storeInvite?.role ?? "Cashier");
-  const displayName = nameParam || restaurantName || "Velvet & Stone Coffee";
-  const accent = colorParam || brandColor.value;
+  const role: WorkerRole = serverInvite
+    ? serverInvite.role
+    : ROLE_VALUES.includes(roleParam ?? "")
+      ? (roleParam as WorkerRole)
+      : (storeInvite?.role ?? "Cashier");
+  const displayName =
+    (serverInvite?.restaurantName || undefined) ??
+    nameParam ??
+    restaurantName ??
+    "Velvet & Stone Coffee";
+  const accent = serverInvite?.brandColor ?? colorParam ?? brandColor.value;
   const expiry = storeInvite?.expiresAt ?? t("inv_expires24");
 
-  const handleAccept = () => {
-    if (!valid || alreadyAccepted) return;
-    if (!storeInvite || storeInvite.status !== "pending") {
-      createInvite(role, token);
+  const handleAccept = async () => {
+    if (!valid || alreadyAccepted || working) return;
+    const cleanName = name.trim();
+    if (!cleanName) return;
+    setWorking(true);
+
+    // Authoritative accept happens server-side against the invite table.
+    let server: AcceptResponse | null = null;
+    try {
+      const res = await fetch("/api/auth/worker/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, name: cleanName }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as AcceptResponse;
+        if (json && typeof json === "object") server = json;
+      } else if (res.status === 401 || res.status === 404) {
+        // The server doesn't recognize this invite. Only fall through when the
+        // invite exists in the local store (offline/demo mode); a bare URL
+        // alone must NOT grant access.
+        if (!storeInvite) {
+          setServerRejected(true);
+          setAccepted(true);
+          setWorking(false);
+          return;
+        }
+      }
+      // 429/503 and network failures degrade to the local demo path.
+    } catch {
+      /* offline — keep local flow */
     }
-    acceptInvite(token, name);
+
+    const serverWorker = server?.cloud ? server.worker : undefined;
+    if (serverWorker) {
+      if (!storeInvite || storeInvite.status !== "pending") createInvite(serverWorker.role, token);
+      acceptInvite(token, serverWorker.name);
+      setWorkerSession({
+        id: serverWorker.id,
+        name: serverWorker.name,
+        role: serverWorker.role,
+      });
+    } else {
+      if (!storeInvite || storeInvite.status !== "pending") createInvite(role, token);
+      acceptInvite(token, cleanName);
+    }
     setAccepted(true);
+    setWorking(false);
     toast.success(t("inv_welcomeToast"), {
       description: t("inv_welcomeToastDesc", { name: displayName, role }),
     });
@@ -79,13 +181,13 @@ function InviteContent() {
       </header>
 
       <main className="mx-auto max-w-md px-4 py-12 sm:py-16">
-        {!mounted ? (
+        {!mounted || !serverChecked ? (
           <div className="rounded-2xl border border-white/10 bg-[#0D0D0D] p-8 text-center animate-pulse">
             <p className="text-xs font-mono uppercase tracking-widest text-white/40">
               {t("inv_loading")}
             </p>
           </div>
-        ) : !valid ? (
+        ) : !valid || serverRejected ? (
           <div className="rounded-2xl border border-white/10 bg-[#0D0D0D] p-8 text-center">
             <div className="w-12 h-12 mx-auto rounded-full border border-white/10 bg-white/5 flex items-center justify-center">
               <span className="text-lg">🕓</span>
@@ -165,9 +267,15 @@ function InviteContent() {
                 />
               </div>
 
-              <Button type="button" className="mt-4 w-full font-bold" size="lg" onClick={handleAccept}>
-                {t("inv_accept")}
-                <ArrowRight className="w-4 h-4 text-black" />
+              <Button
+                type="button"
+                className="mt-4 w-full font-bold"
+                size="lg"
+                onClick={() => void handleAccept()}
+                disabled={working}
+              >
+                {working ? t("inv_working") ?? "Working…" : t("inv_accept")}
+                {!working && <ArrowRight className="w-4 h-4 text-black" />}
               </Button>
 
               <p className="mt-4 text-center text-[10px] text-white/35">

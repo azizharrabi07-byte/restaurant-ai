@@ -96,13 +96,17 @@ async function postWithRetry(
   headers: Record<string, string>,
   body: BodyInit,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
+  // Fail fast on missing configuration: apiKey() throws NO_KEY here, OUTSIDE
+  // the retry loop, so a missing MISTRAL_API_KEY is never misreported as a
+  // NETWORK failure after ~20s of pointless retries.
+  const key = apiKey();
   for (let attempt = 0; attempt < 6; attempt++) {
     let res: Response;
     try {
       res = await fetch(`${MISTRAL_BASE}${path}`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey()}`,
+          Authorization: `Bearer ${key}`,
           ...headers,
         },
         body,

@@ -25,19 +25,38 @@ Environment (`.env.local`):
 | Var | What it's for |
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public anon key (browser) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server-only** service role key. Never commit a real value. |
-| `NEXT_PUBLIC_APP_URL` | canonical app URL (defaults to the browser origin) |
+| `MISTRAL_API_KEY` | **server-only** Mistral key for menu OCR scanning |
+| `MISTRAL_OCR_MODEL` | optional OCR model override (default `mistral-ocr-latest`) |
+| `NEXT_PUBLIC_APP_URL` | canonical app URL (used for password-recovery links; defaults to the browser origin) |
+| `SUFRA_RATE_LIMIT_DISABLED` | set to `1` to disable rate limiting (dev/tests only) |
+| `SUFRA_PLACEHOLDER_OWNER_EMAIL` | optional override for the legacy auto-provisioned owner email matched at signup |
 
-The server resolves ownership via `resolveOwnerUserId()` in `src/lib/supabase-admin.ts`:
-it takes `owner_id` from the first `restaurants` row (email-independent) and only
-auto-provisions an auth user when no restaurant exists yet.
+> The browser never talks to Supabase directly — there is no anon-key client.
+> Every database call goes through Next.js API routes using the service role,
+> and every protected route verifies the caller's session server-side.
+
+Authentication:
+
+- **Owner:** Supabase Auth email + password. Sign up once at `/auth/signup`
+  (binds the account to the restaurant), then sign in at `/auth/login`. The
+  session lives in an `HttpOnly` cookie; `/dashboard/*` redirects to login
+  when it is missing or invalid.
+- **Workers:** the owner mints a one-time invite (dashboard → Workers), the
+  worker opens `/worker/invite/<token>` and picks a name. Accepting sets an
+  `HttpOnly` worker cookie. Roles (`Cashier`, `Manager`) are enforced
+  server-side on every order mutation — the client role is display only.
+- **Guests:** no account. Ordering is public by design but fully
+  server-priced: the browser sends product ids + quantities, the server
+  resolves prices from the database.
 
 Checks:
 
 ```bash
 npm run typecheck   # tsc --noEmit
 npm run lint        # next lint
+npm run test        # vitest run
+npm run build       # production build
 ```
 
 ### Docker (optional)
@@ -50,206 +69,49 @@ docker compose up --build   # serves on :3000
 
 ---
 
-## 2. Supabase — the DDL the app needs
+## 2. Supabase — schema and migration
 
-These tables/constraints match the API routes (`/api/menu`, `/api/orders`,
-`/api/menu/[slug]`). Adjust column types to your project if needed — the app only
-requires the columns listed below.
+The schema lives in versioned SQL, not in this README:
 
-```sql
--- Users auto-provisioned by the app (service role).
--- restaurants.owner_id -> auth.users.id
+- `supabase/migrations/1002_production_readiness.sql` — the production
+  migration. Run it once in the Supabase SQL editor (it is idempotent, safe
+  to re-run). It creates:
+  - `sufra_daily_counters` + `sufra_next_order_number()` — atomic daily
+    ticket numbers (first ticket of the day is #1001),
+  - unique backstop on `orders (restaurant_id, day, daily_order_number)`,
+  - `orders.client_ref` — idempotent re-submission (double-click safe),
+  - `products.sort_order` — stable menu ordering,
+  - `workers.session_token` — server-side worker sessions,
+  - money/quantity `CHECK` constraints,
+  - RLS lockdown (the app runs on the service role, which bypasses RLS;
+    these policies exist so an exposed anon key can't read private data),
+  - the public `menu-images` Storage bucket for menu photos.
 
-create table if not exists public.restaurants (
-  id                 uuid primary key default gen_random_uuid(),
-  owner_id           uuid not null references auth.users (id) on delete cascade,
-  name               text not null,
-  slug               text not null unique,
-  brand_color        text not null default '#D97706',
-  logo_url           text,
-  cover_url          text,
-  menu_layout_theme  text not null default 'classic',  -- classic | minimal | vibrant | gallery
-  is_active          boolean not null default true,
-  created_at         timestamptz not null default now()
-);
+Live tables (columns the app actually uses): `restaurants` (incl.
+`owner_id → auth.users.id`, `slug`, `business_type`, `currency`,
+`primary_color`, `cover_image`, `menu_layout_theme`, `is_published`),
+`categories` (`sort_order`), `products` (`category_id`, `price`,
+`image_url`, `image_source`, `is_available`, `sort_order`),
+`restaurant_tables` (`table_number`, `qr_token`), `orders` (`status`,
+`total`, `daily_order_number`, `is_paid`, `paid_at`, `client_ref`),
+`order_items` (`product_id` nullable for manual lines,
+`product_name_snapshot`, `price_snapshot`, `quantity`), `workers`
+(`restaurant_id`, `full_name`, `role`, `session_token`), `worker_invites`
+(`invite_token`, `role`, `is_used`, `used_by`, `expires_at`).
 
-create table if not exists public.categories (
-  id             uuid primary key default gen_random_uuid(),
-  restaurant_id  uuid not null references public.restaurants (id) on delete cascade,
-  name           text not null,
-  position       integer not null default 0,
-  created_at     timestamptz not null default now()
-);
-
-create table if not exists public.products (
-  id             uuid primary key default gen_random_uuid(),
-  restaurant_id  uuid not null references public.restaurants (id) on delete cascade,
-  category_id    uuid references public.categories (id) on delete set null,
-  name           text not null,
-  description    text not null default '',
-  price          numeric(10,3) not null default 0,
-  image_url      text,
-  image_source   text not null default 'none'
-                  check (image_source in ('none','pending','ai','manual','external')),
-  is_available   boolean not null default true,
-  position       integer not null default 0,
-  created_at     timestamptz not null default now()
-);
-create index if not exists idx_products_restaurant on public.products (restaurant_id, position);
-
-create table if not exists public.restaurant_tables (
-  id            uuid primary key default gen_random_uuid(),
-  restaurant_id uuid not null references public.restaurants (id) on delete cascade,
-  table_number  integer not null,
-  qr_token      text not null
-);
-create unique index if not exists idx_tables_restaurant_number
-  on public.restaurant_tables (restaurant_id, table_number);
-create unique index if not exists idx_tables_qr_token on public.restaurant_tables (qr_token);
-
-create table if not exists public.orders (
-  id                  uuid primary key default gen_random_uuid(),
-  restaurant_id       uuid not null references public.restaurants (id) on delete cascade,
-  table_id            uuid references public.restaurant_tables (id),
-  status              text not null default 'pending'
-                        check (status in ('pending','accepted','paid')),
-  total               numeric(10,3) not null default 0,
-  daily_order_number  integer not null,
-  is_paid             boolean not null default false,
-  paid_at             timestamptz,
-  created_at          timestamptz not null default now()
-);
-create index if not exists idx_orders_restaurant_created
-  on public.orders (restaurant_id, created_at desc);
-
-create table if not exists public.order_items (
-  id                    uuid primary key default gen_random_uuid(),
-  order_id              uuid not null references public.orders (id) on delete cascade,
-  product_id            uuid references public.products (id) on delete set null,
-  product_name_snapshot text not null,
-  price_snapshot        numeric(10,3) not null default 0,
-  quantity              integer not null default 1,
-  created_at            timestamptz not null default now()
-);
-
--- Keep the order total in sync with its line items.
-create or replace function public.recalc_order_total()
-returns trigger language plpgsql as $$
-begin
-  update public.orders o
-     set total = coalesce((
-       select sum(i.price_snapshot * i.quantity) from public.order_items i where i.order_id = NEW.order_id
-     ), 0)
-   where o.id = NEW.order_id;
-  return NEW;
-end; $$;
-
-create trigger trg_recalc_order_total
-  after insert or update or delete on public.order_items
-  for each row execute function public.recalc_order_total();
-```
-
-> **RLS note:** the app talks to these tables with the **service role key** (server-only),
-> which bypasses RLS. If you enable RLS, add policies for the `service_role`/`anon` users
-> or keep the tables readable by the anon key for the public guest menu (`/api/menu/[slug]`).
-> Orders are always written through `/api/orders` (server-side), never directly from the browser.
+> **RLS note:** the app talks to these tables with the **service role key**
+> (server-only), which bypasses RLS. The migration enables RLS with
+> owner-scoped policies as defense-in-depth.
+> Orders are always written through `/api/orders` (server-side, server-priced),
+> never directly from the browser.
 
 ---
 
-## 3. n8n workflow (the DSL code) — order → WhatsApp/notification
-
-Sufra can fire an order webhook that n8n receives for WhatsApp / Slack / Telegram alerts.
-Point `N8N_WEBHOOK_URL` at a published n8n Webhook workflow, and it is POSTed a JSON
-body from `POST /api/orders` on every new order.
-
-The workflow is written with the `@n8n/workflow-sdk` (the n8n Workflow DSL):
-
-```javascript
-import { workflow, trigger, node, expr } from '@n8n/workflow-sdk';
-
-// 1. Webhook trigger — POST body:
-//    { slug, tableToken, items: [{ productId, name, price, qty }], total, number }
-const newOrderWebhook = trigger({
-  type: 'n8n-nodes-base.webhook',
-  version: 2.1,
-  config: {
-    name: 'New Order Webhook',
-    parameters: {
-      path: 'sufra-order',          // → https://<n8n>/webhook/sufra-order
-      httpMethod: 'POST',
-      responseMode: 'onReceived'
-    }
-  }
-});
-
-// 2. Build the human-readable alert text.
-const formatMessage = node({
-  type: 'n8n-nodes-base.set',
-  version: 3.4,
-  config: {
-    name: 'Format Message',
-    parameters: {
-      mode: 'manual',
-      includeOtherFields: true,
-      assignments: {
-        assignments: [
-          {
-            id: 'sufra-alert',
-            name: 'alertText',
-            value: expr("'🛎️ Nouvelle commande #' + $json.number + ' — ' + $json.total + ' DT'"),
-            type: 'string'
-          }
-        ]
-      }
-    }
-  }
-});
-
-// 3. Send it (WhatsApp Cloud API via generic HTTP Request — swap for a Slack
-//    or Telegram node if you prefer). executeOnce keeps it to ONE message
-//    even when the webhook receives multiple items.
-const sendWhatsApp = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.3,
-  config: {
-    name: 'Send WhatsApp',
-    executeOnce: true,
-    parameters: {
-      method: 'POST',
-      url: 'https://graph.facebook.com/v19.0/<phone-number-id>/messages',
-      sendHeaders: true,
-      headerParameters: {
-        parameters: [
-          { name: 'Authorization', value: 'Bearer <WHATSAPP_TOKEN>' }
-        ]
-      },
-      contentType: 'json',
-      jsonBody:
-        "{ \"messaging_product\": \"whatsapp\", \"to\": \"<owner-phone>\", " +
-        "\"type\": \"text\", \"text\": { \"body\": \"{{ $json.alertText }}\" } }"
-    }
-  }
-});
-
-// 4. Wire it together.
-export default workflow('sufra-order-alert', 'Sufra Order Alert')
-  .add(newOrderWebhook)
-  .to(formatMessage)
-  .to(sendWhatsApp);
-```
-
-Import + activate the workflow (Webhook trigger must be **Active**), then set
-`N8N_WEBHOOK_URL=https://<n8n-host>/webhook/sufra-order` in `.env.local` and restart
-the app. Everything after the webhook is yours to change — the DSL is just the
-plumbing that turns a new order into a notification.
-
----
-
-## 4. Connecting to the internet with ngrok
+## 3. Connecting to the internet with ngrok
 
 In development the app only listens on `http://localhost:3000`. To let a phone on
-a different network (or n8n / Supabase) reach it, we exposed it to the internet with
-**ngrok**:
+a different network reach it (for scanning table QR codes), we exposed it to the
+internet with **ngrok**:
 
 ```bash
 # 1. Install (any of these):
@@ -266,13 +128,13 @@ ngrok prints a public HTTPS URL, e.g. `https://abc123-ngrok.ngrok-free.app`.
 That URL now proxies straight to `localhost:3000`:
 
 ```bash
-curl https://abc123-ngrok.ngrok-free.app/api/menu     # 200 — same JSON as localhost
+curl https://abc123-ngrok.ngrok-free.app/api/auth/session   # 200 — { cloud, user }
 ```
 
 **Why it "just works" with Sufra:** the app never hard-codes `localhost`. Every URL it
 generates is derived from the browser's origin via `appBaseUrl()` in
-`src/lib/utils.ts` (`window.location.origin`), so scan-the-QR links, order webhooks,
-and menu URLs automatically carry whatever origin the request came through — localhost
+`src/lib/utils.ts` (`window.location.origin`), so scan-the-QR links and menu URLs
+automatically carry whatever origin the request came through — localhost
 during development, the ngrok URL on the open internet, and a real domain in
 production. No config change is needed when switching.
 
@@ -281,9 +143,6 @@ Tips/limits for the free plan:
 ```bash
 # Fixed subdomain (recommended once your tunnel URL is shared anywhere):
 ngrok http --url=sufra-table-order-01.ngrok-free.app 3000
-
-# Exposing a local n8n (port 5678) the same way, when building the WhatsApp flow:
-ngrok http 5678
 ```
 
 - Free ngrok sessions recycle after ~8 h; QR codes printed with the free random URL
@@ -301,13 +160,18 @@ ngrok http 5678
 | --- | --- |
 | Public landing (EN/FR/AR + $/€) | `src/app/page.tsx`, `src/lib/landing-i18n.tsx` |
 | Owner onboarding wizard | `src/app/onboarding/` |
+| Owner auth (signup/login/logout) | `src/app/auth/`, `src/app/api/auth/` |
 | Owner dashboard | `src/app/(owner)/dashboard/` |
+| Worker terminal + invite accept | `src/app/(worker)/worker/`, `src/app/api/auth/worker/` |
 | Guest menu (scan → order) | `src/app/menu/[slug]/[token]/`, `src/components/guest-menu.tsx` |
-| Menu sync API (supabase round-trip) | `src/app/api/menu/`, `src/lib/menu-mapping.ts` |
-| Orders API | `src/app/api/orders/` |
+| Menu sync API (validation + IDOR guard) | `src/app/api/menu/`, `src/lib/menu-mapping.ts`, `src/lib/menu-sync-guard.ts` |
+| Orders API (server pricing, atomic numbers) | `src/app/api/orders/`, `src/lib/order-utils.ts` |
+| Image upload → Supabase Storage | `src/app/api/upload/`, `src/components/image-dropzone.tsx` |
+| Auth sessions + worker permissions | `src/lib/owner-auth.ts`, `src/lib/worker-auth.ts`, `src/lib/worker-permissions.ts` |
+| Rate limiting | `src/lib/rate-limit.ts` |
 | Phone preview component | `src/components/phone-mockup.tsx` |
 | Brand mark / wordmark | `src/components/brand-logo.tsx` |
-| Owner resolution (server) | `src/lib/supabase-admin.ts` |
+| Supabase server client | `src/lib/supabase-admin.ts` |
 
 ---
 

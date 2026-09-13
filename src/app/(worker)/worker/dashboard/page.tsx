@@ -90,6 +90,10 @@ export default function WorkerDashboardPage() {
     toast.success(t("wd_paidToast"), { description: t("wd_paidToastDesc") });
   };
 
+  // UI hint only — the server re-checks the role on every PATCH. Cashiers
+  // don't get the button; managers do.
+  const canMarkPaid = workerSession?.role === "Manager";
+
   return (
     <>
       <NewOrderAlerts orders={orders} venue={venue} />
@@ -149,14 +153,14 @@ export default function WorkerDashboardPage() {
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {items.map((order) => (
-                    <OrderCard
-                      key={order.id}
-                      order={order}
-                      onAccept={handleAccept}
-                      onPaid={handlePaid}
-                    />
-                  ))}
+{items.map((order) => (
+                      <OrderCard
+                        key={order.id}
+                        order={order}
+                        onAccept={handleAccept}
+                        onPaid={canMarkPaid ? handlePaid : undefined}
+                      />
+                    ))}
                 </div>
               )}
 

@@ -25,8 +25,12 @@ export function slugify(value: string): string {
 }
 
 export function makeToken(prefix: string): string {
-  const rand = () => Math.random().toString(36).slice(2, 6);
-  return `${prefix}-${rand()}${rand()}`;
+  // Cryptographically secure (server mints real invite tokens; this is only
+  // the offline/demo fallback, but it must still be unpredictable).
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  const rand = Array.from(bytes, (b) => b.toString(36)).join("").slice(0, 8);
+  return `${prefix}-${rand}`;
 }
 
 export function appBaseUrl(): string {

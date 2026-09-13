@@ -209,7 +209,17 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     if (!hasMenuContent(current)) return;
 
     const payload = menuPayloadFromState(current);
-    localStorage.setItem(MENU_SYNC_KEY, JSON.stringify(payload));
+    // Local snapshot is best-effort only: base64 images can exceed the ~5MB
+    // quota (QuotaExceededError). That must never kill the server save below.
+    try {
+      localStorage.setItem(MENU_SYNC_KEY, JSON.stringify(payload));
+    } catch {
+      try {
+        localStorage.removeItem(MENU_SYNC_KEY);
+      } catch {
+        /* storage unavailable — server save still proceeds */
+      }
+    }
 
     setSavingState("saving");
     try {
@@ -227,7 +237,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           setSavingState("local");
         }
       } else {
-        setSavingState(result.error === "NO_OWNER" ? "local" : "error");
+        setSavingState(
+          result.error === "NO_OWNER" || result.error === "UNAUTHORIZED"
+            ? "local"
+            : "error",
+        );
       }
     } catch {
       setSavingState("error");
@@ -416,7 +430,9 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
             return {
               id: uid(),
               number: num,
-              token: uid().replace(/-/g, "").slice(0, 8),
+              // 64-bit token (16 hex chars): unpredictable, not derived from
+              // the table number or anything guessable.
+              token: uid().replace(/-/g, "").slice(0, 16),
             };
           }),
         };

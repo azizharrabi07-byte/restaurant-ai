@@ -108,12 +108,11 @@ export function WorkerNewOrderDialog({
         body: JSON.stringify({
           slug,
           tableNumber,
-          items: lines.map((l) => ({
-            productId: l.productId ?? "manual",
-            name: l.name,
-            price: l.price,
-            qty: l.qty,
-          })),
+          items: lines.map((l) =>
+            l.productId
+              ? { productId: l.productId, qty: l.qty }
+              : { name: l.name, price: l.price, qty: l.qty },
+          ),
         }),
       });
       const data = (await res.json()) as { cloud?: boolean; order?: { number?: number } };

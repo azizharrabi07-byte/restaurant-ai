@@ -1,10 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Upload, X, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { Upload, X, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { downscaleImage } from "@/lib/image-utils";
 import { useI18n } from "@/lib/i18n";
+
+const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 
 interface ImageDropzoneProps {
   value: string | null;
@@ -30,13 +33,43 @@ export function ImageDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const handleFiles = async (files: FileList | null) => {
-    if (!files || !files[0]) return;
+    if (!files || !files[0] || uploading) return;
     const file = files[0];
     if (!file.type.startsWith("image/")) return;
-    const dataUrl = await downscaleImage(file);
-    onChange(dataUrl);
+    if (file.size > UPLOAD_MAX_BYTES) {
+      toast.error(t("idz_tooLarge"));
+      return;
+    }
+    // Prefer persistent storage: the server returns a public URL so the menu
+    // payload (and localStorage snapshot) never carries multi-MB base64.
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      if (res.ok) {
+        const json = (await res.json()) as { cloud?: boolean; url?: string };
+        if (json.cloud && typeof json.url === "string") {
+          onChange(json.url);
+          return;
+        }
+      }
+      throw new Error("upload failed");
+    } catch {
+      // Offline/unauthenticated: fall back to a local data URL so the UI
+      // keeps working. The sync guard rejects data URLs for cloud saves.
+      try {
+        const dataUrl = await downscaleImage(file);
+        onChange(dataUrl);
+      } catch {
+        toast.error(t("idz_failed"));
+      }
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -147,23 +180,36 @@ export function ImageDropzone({
         <div
           onDragOver={(e) => {
             e.preventDefault();
-            setIsDragging(true);
+            if (!uploading) setIsDragging(true);
           }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => {
+            if (!uploading) inputRef.current?.click();
+          }}
           className={cn(
-            "border border-dashed rounded-lg p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-150 bg-white/[0.02] hover:border-white/20",
+            "border border-dashed rounded-lg p-5 flex flex-col items-center justify-center text-center transition-all duration-150 bg-white/[0.02] hover:border-white/20",
+            uploading ? "opacity-60 pointer-events-none" : "cursor-pointer",
             isDragging ? "border-white bg-white/5" : "border-white/10",
             aspectClass,
           )}
         >
           <div className="w-9 h-9 rounded-full border border-white/20 bg-[#141414] flex items-center justify-center text-white/40 mb-2 group-hover:text-white transition-colors">
-            <Upload className="w-4 h-4" />
+            {uploading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
           </div>
           <p className="text-xs font-medium text-white/80">
-            <span className="text-white font-semibold underline underline-offset-2">{t("idz_clickToUpload")}</span>{" "}
-            {t("idz_orDrag")}
+            {uploading ? (
+              t("idz_uploading")
+            ) : (
+              <>
+                <span className="text-white font-semibold underline underline-offset-2">{t("idz_clickToUpload")}</span>{" "}
+                {t("idz_orDrag")}
+              </>
+            )}
           </p>
           <p className="text-[10px] uppercase tracking-wider text-white/40 mt-1">{t("idz_formatHint")}</p>
         </div>

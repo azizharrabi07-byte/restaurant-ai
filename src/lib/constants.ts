@@ -118,6 +118,8 @@ export interface Order {
   table: number;
   placedAt: string;
   hour: number;
+  /** ISO timestamp when present (cloud orders); lets clients localize the hour. */
+  createdAt?: string;
   status: OrderStatus;
   isPaid: boolean;
   items: OrderItem[];

@@ -227,6 +227,8 @@ const copy: Record<AppLang, Record<string, string>> = {
     inv_expires24Short: "{role} · expires in 24 hours",
     inv_awaiting: "Awaiting accept",
     inv_createAnother: "Create another invite",
+    inv_working: "Working…",
+    inv_needLogin: "Sign in as the owner first — this device isn't linked to the restaurant.",
 
     // Workers page
     wk_eyebrow: "Owner · Workers",
@@ -600,6 +602,9 @@ const copy: Record<AppLang, Record<string, string>> = {
     idz_change: "Change",
     idz_remove: "Remove",
     idz_uploadedAlt: "Uploaded asset",
+    idz_uploading: "Uploading…",
+    idz_tooLarge: "Image must be under 5 MB.",
+    idz_failed: "Couldn't read that image.",
 
     // Demo data
     demo_ven: "Velvet & Stone Coffee",
@@ -814,6 +819,8 @@ const copy: Record<AppLang, Record<string, string>> = {
     inv_expires24Short: "{role} · expire dans 24 heures",
     inv_awaiting: "En attente d'acceptation",
     inv_createAnother: "Créer une autre invitation",
+    inv_working: "En cours…",
+    inv_needLogin: "Connectez-vous d'abord en tant que propriétaire — cet appareil n'est pas lié au restaurant.",
 
     wk_eyebrow: "Propriétaire · Employés",
     wk_terminal: "Terminal employé",
@@ -1180,6 +1187,9 @@ const copy: Record<AppLang, Record<string, string>> = {
     idz_change: "Changer",
     idz_remove: "Retirer",
     idz_uploadedAlt: "Image importée",
+    idz_uploading: "Import en cours…",
+    idz_tooLarge: "L'image doit peser moins de 5 Mo.",
+    idz_failed: "Impossible de lire cette image.",
 
     // Données de démo
     demo_ven: "Velvet & Stone Coffee",
@@ -1391,6 +1401,8 @@ const copy: Record<AppLang, Record<string, string>> = {
     inv_expires24Short: "{role} · ينتهي خلال 24 ساعة",
     inv_awaiting: "في انتظار القبول",
     inv_createAnother: "إنشاء دعوة أخرى",
+    inv_working: "جارٍ العمل…",
+    inv_needLogin: "سجّل الدخول كمالك أولاً — هذا الجهاز غير مرتبط بالمطعم.",
 
     wk_eyebrow: "المالك · الموظفون",
     wk_terminal: "محطة الموظف",
@@ -1756,6 +1768,9 @@ const copy: Record<AppLang, Record<string, string>> = {
     idz_change: "تغيير",
     idz_remove: "إزالة",
     idz_uploadedAlt: "الصورة المرفوعة",
+    idz_uploading: "جارٍ الرفع…",
+    idz_tooLarge: "يجب أن تكون الصورة أقل من 5 م.ب.",
+    idz_failed: "تعذّرت قراءة هذه الصورة.",
 
     // بيانات تجريبية
     demo_ven: "فيلفيت آند ستون كوفي",

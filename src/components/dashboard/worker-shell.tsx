@@ -1,16 +1,54 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { MessageSquareText } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { useI18n } from "@/lib/i18n";
 import { RestaurantLogo } from "@/components/restaurant-logo";
 
 export function WorkerShell({ children }: { children: React.ReactNode }) {
-  const { restaurantName, logo, brandColor, orders } = useOnboarding();
+  const { restaurantName, logo, brandColor, orders, workerSession, setWorkerSession } = useOnboarding();
   const { t, plural } = useI18n();
+  const router = useRouter();
   const displayName = restaurantName || "Velvet & Stone Coffee";
   const pendingCount = orders.filter((o) => o.status === "pending").length;
+
+  // Server-validated gate: restores the worker identity from the HttpOnly
+  // session cookie when local storage is empty, and bounces devices with no
+  // valid session (revoked/expired/forged) back home. Offline demo mode
+  // (503 NO_BACKEND) is left alone so local invites keep working.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/worker/me");
+        if (!alive) return;
+        if (res.ok) {
+          const json = (await res.json()) as {
+            cloud?: boolean;
+            worker?: { id: string; name: string; role: "Cashier" | "Manager" };
+          };
+          if (json.cloud && json.worker && !workerSession) {
+            setWorkerSession({
+              id: json.worker.id,
+              name: json.worker.name,
+              role: json.worker.role,
+            });
+          }
+        } else if (res.status === 401 && !workerSession) {
+          router.replace("/");
+        }
+      } catch {
+        /* offline demo — keep local flow */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="min-h-dvh bg-background text-foreground">

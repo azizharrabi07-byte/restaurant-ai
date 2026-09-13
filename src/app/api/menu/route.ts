@@ -1,10 +1,21 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin, resolveOwnerUserId } from "@/lib/supabase-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  attachOwnerSessionRotation,
+  getOwnerSessionForRequest,
+} from "@/lib/owner-auth";
+import { getWorkerSession } from "@/lib/worker-auth";
 import { isMenuTheme } from "@/lib/constants";
 import {
   type MenuGetResponse,
   type MenuSyncPayload,
 } from "@/lib/menu-mapping";
+import {
+  findSyncConflicts,
+  type OwnedRow,
+  type SyncConflict,
+  validateSyncPayload,
+} from "@/lib/menu-sync-guard";
 
 const EMPTY: MenuGetResponse = {
   source: "empty",
@@ -14,46 +25,73 @@ const EMPTY: MenuGetResponse = {
   tables: [],
 };
 
-export async function GET() {
+/** Rows whose restaurant_id is null are treated as foreign (don't steal). */
+async function fetchForeignRows(
+  table: "categories" | "products" | "restaurant_tables",
+  ids: string[],
+  restaurantId: string,
+): Promise<OwnedRow[]> {
+  const rest = ids.filter((id) => typeof id === "string" && id.length > 0);
+  if (rest.length === 0 || !supabaseAdmin) return [];
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select("id, restaurant_id")
+    .or(`restaurant_id.neq.${restaurantId},restaurant_id.is.null`)
+    .in("id", rest);
+  if (error) return [];
+  return (data ?? []).map((r) => ({ id: r.id, restaurantId: r.restaurant_id }));
+}
+
+export async function GET(req: Request) {
   if (!supabaseAdmin) return NextResponse.json(EMPTY);
 
-  const ownerId = await resolveOwnerUserId();
-  if (!ownerId) return NextResponse.json(EMPTY);
+  const owner = await getOwnerSessionForRequest(req);
+  const worker = await getWorkerSession(req);
+  if (!owner && !worker) return NextResponse.json(EMPTY, { status: 401 });
 
-  const { data: restaurants, error: rErr } = await supabaseAdmin
-    .from("restaurants")
-    .select("*")
-    .eq("owner_id", ownerId)
-    .order("created_at", { ascending: true })
-    .limit(1);
-
-  if (rErr) {
-    return NextResponse.json(EMPTY, { status: 200 });
+  let restaurantId: string | null = null;
+  if (owner) {
+    const { data: restaurants, error: rErr } = await supabaseAdmin
+      .from("restaurants")
+      .select("id")
+      .eq("owner_id", owner.user.userId)
+      .order("created_at", { ascending: true })
+      .limit(1);
+    if (rErr) return NextResponse.json(EMPTY, { status: 200 });
+    restaurantId = restaurants?.[0]?.id ?? null;
+  } else {
+    restaurantId = worker?.restaurantId ?? null;
   }
-
-  const restaurant = restaurants?.[0];
-  if (!restaurant) return NextResponse.json(EMPTY);
+  if (!restaurantId) return NextResponse.json(EMPTY);
 
   const [{ data: categories }, { data: products }, { data: tables }] =
     await Promise.all([
       supabaseAdmin
         .from("categories")
         .select("*")
-        .eq("restaurant_id", restaurant.id)
+        .eq("restaurant_id", restaurantId)
         .order("sort_order", { ascending: true }),
       supabaseAdmin
         .from("products")
         .select("*")
-        .eq("restaurant_id", restaurant.id)
+        .eq("restaurant_id", restaurantId)
         .order("created_at", { ascending: true }),
       supabaseAdmin
         .from("restaurant_tables")
         .select("*")
-        .eq("restaurant_id", restaurant.id)
+        .eq("restaurant_id", restaurantId)
         .order("table_number", { ascending: true }),
     ]);
 
-  return NextResponse.json({
+  const { data: restaurantRows } = await supabaseAdmin
+    .from("restaurants")
+    .select("*")
+    .eq("id", restaurantId)
+    .limit(1);
+  const restaurant = restaurantRows?.[0];
+  if (!restaurant) return NextResponse.json(EMPTY);
+
+  const body = {
     source: "supabase",
     restaurant: {
       id: restaurant.id,
@@ -86,7 +124,11 @@ export async function GET() {
       number: t.table_number,
       token: t.qr_token,
     })),
-  } satisfies MenuGetResponse);
+  } satisfies MenuGetResponse;
+
+  const res = NextResponse.json(body);
+  if (owner) return attachOwnerSessionRotation(res, owner);
+  return res;
 }
 
 export async function PUT(req: Request) {
@@ -95,17 +137,27 @@ export async function PUT(req: Request) {
     return NextResponse.json({ cloud: false, error: "NO_OWNER" });
   }
 
-  let payload: MenuSyncPayload;
+  const session = await getOwnerSessionForRequest(req);
+  if (!session) {
+    return NextResponse.json({ cloud: false, error: "UNAUTHORIZED" }, { status: 401 });
+  }
+  const ownerId = session.user.userId;
+
+  let raw: unknown;
   try {
-    payload = (await req.json()) as MenuSyncPayload;
+    raw = await req.json();
   } catch {
     return NextResponse.json({ cloud: false, error: "BAD_BODY" }, { status: 400 });
   }
 
-  const ownerId = await resolveOwnerUserId();
-  if (!ownerId) {
-    return NextResponse.json({ cloud: false, error: "NO_OWNER" });
+  const validated = validateSyncPayload(raw);
+  if (!validated.ok) {
+    return NextResponse.json(
+      { cloud: false, error: "BAD_PAYLOAD", issues: validated.issues },
+      { status: 400 },
+    );
   }
+  const payload = validated.payload;
 
   // 1. Resolve or create the restaurant row.
   let restaurantId: string | null = null;
@@ -116,25 +168,25 @@ export async function PUT(req: Request) {
       .eq("owner_id", ownerId)
       .order("created_at", { ascending: true })
       .limit(1);
-const r = payload.restaurant;
-      const theme = isMenuTheme(r.theme) ? r.theme : "classic";
-      if (existing?.[0]?.id) {
-        restaurantId = existing[0].id;
-        await supabaseAdmin
-          .from("restaurants")
-          .update({
-            name: r.name,
-            slug: r.slug,
-            tagline: r.tagline,
-            business_type: r.businessType,
-            logo_url: r.logoUrl,
-            cover_image: r.coverUrl,
-            primary_color: r.primaryColor,
-            menu_layout_theme: theme,
-            is_published: r.isPublished,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", restaurantId);
+    const r = payload.restaurant;
+    const theme = isMenuTheme(r.theme) ? r.theme : "classic";
+    if (existing?.[0]?.id) {
+      restaurantId = existing[0].id;
+      await supabaseAdmin
+        .from("restaurants")
+        .update({
+          name: r.name,
+          slug: r.slug,
+          tagline: r.tagline,
+          business_type: r.businessType,
+          logo_url: r.logoUrl,
+          cover_image: r.coverUrl,
+          primary_color: r.primaryColor,
+          menu_layout_theme: theme,
+          is_published: r.isPublished,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", restaurantId);
     } else {
       const { data: created, error: cErr } = await supabaseAdmin
         .from("restaurants")
@@ -154,13 +206,62 @@ const r = payload.restaurant;
         .select("id")
         .single();
       if (cErr || !created) {
+        if (String(cErr?.message ?? "").toLowerCase().includes("slug"))
+          return NextResponse.json({ cloud: false, error: "SLUG_TAKEN" }, { status: 409 });
         return NextResponse.json({ cloud: false, error: "INSERT_RESTAURANT" }, { status: 500 });
       }
       restaurantId = created.id;
     }
   }
 
-  // 2. Reconcile categories (upsert by id, then delete removed ones).
+  if (!restaurantId) {
+    return NextResponse.json({ cloud: false, error: "NO_RESTAURANT" }, { status: 500 });
+  }
+
+  // 2. Slug availability (in-app uniqueness; DB lacks a constraint).
+  {
+    const { data: clash } = await supabaseAdmin
+      .from("restaurants")
+      .select("id")
+      .eq("slug", payload.restaurant.slug)
+      .not("id", "eq", restaurantId)
+      .limit(1);
+    if ((clash ?? []).length > 0) {
+      return NextResponse.json({ cloud: false, error: "SLUG_TAKEN" }, { status: 409 });
+    }
+  }
+
+  // 3. Ownership checks — any payload id that already exists under another
+  //    restaurant (or is orphaned) is rejected before any upsert/delete runs.
+  const categoryIds = payload.categories.map((c) => c.id);
+  const productIds = payload.products.map((p) => p.id);
+  const tableIds = payload.tables.map((t) => t.id);
+  const referencedCategoryIds = [
+    ...new Set(payload.products.map((p) => p.categoryId)),
+  ];
+
+  const conflicts: SyncConflict[] = findSyncConflicts({
+    restaurantId,
+    incoming: { categoryIds, productIds, tableIds, referencedCategoryIds },
+    foreign: {
+      categories: await fetchForeignRows("categories", categoryIds, restaurantId),
+      products: await fetchForeignRows("products", productIds, restaurantId),
+      tables: await fetchForeignRows("restaurant_tables", tableIds, restaurantId),
+      referencedCategories: await fetchForeignRows(
+        "categories",
+        referencedCategoryIds,
+        restaurantId,
+      ),
+    },
+  });
+  if (conflicts.length > 0) {
+    return NextResponse.json(
+      { cloud: false, error: "FORBIDDEN", conflicting: conflicts },
+      { status: 403 },
+    );
+  }
+
+  // 4. Reconcile categories (upsert by id, then delete removed ones).
   {
     const rows = payload.categories.map((c) => ({
       id: c.id,
@@ -188,18 +289,28 @@ const r = payload.restaurant;
       .filter((id) => !keepIds.has(id));
 
     if (removedCatIds.length > 0) {
-      await supabaseAdmin
-        .from("products")
-        .delete()
-        .in("category_id", removedCatIds);
+      // Authorization re-check: only delete rows we already confirmed are ours
+      // (non-null restaurant_id == restaurantId).
       await supabaseAdmin
         .from("categories")
         .delete()
-        .in("id", removedCatIds);
+        .in("id", removedCatIds)
+        .eq("restaurant_id", restaurantId);
+      const { data: orphanProducts } = await supabaseAdmin
+        .from("products")
+        .select("id")
+        .in("category_id", removedCatIds)
+        .eq("restaurant_id", restaurantId);
+      if ((orphanProducts ?? []).length > 0) {
+        await supabaseAdmin
+          .from("products")
+          .delete()
+          .in("id", (orphanProducts ?? []).map((p) => p.id));
+      }
     }
   }
 
-  // 3. Reconcile products.
+  // 5. Reconcile products.
   {
     const rows = payload.products.map((p) => ({
       id: p.id,
@@ -232,11 +343,15 @@ const r = payload.restaurant;
       .map((p) => p.id)
       .filter((id) => !keepProdIds.has(id));
     if (removedProdIds.length > 0) {
-      await supabaseAdmin.from("products").delete().in("id", removedProdIds);
+      await supabaseAdmin
+        .from("products")
+        .delete()
+        .in("id", removedProdIds)
+        .eq("restaurant_id", restaurantId);
     }
   }
 
-  // 4. Reconcile tables (QR stands).
+  // 6. Reconcile tables (QR stands).
   {
     const rows = payload.tables.map((t) => ({
       id: t.id,
@@ -264,9 +379,13 @@ const r = payload.restaurant;
       await supabaseAdmin
         .from("restaurant_tables")
         .delete()
-        .in("id", removedTableIds);
+        .in("id", removedTableIds)
+        .eq("restaurant_id", restaurantId);
     }
   }
 
-  return NextResponse.json({ cloud: true, restaurantId });
+  return attachOwnerSessionRotation(
+    NextResponse.json({ cloud: true, restaurantId }),
+    session,
+  );
 }

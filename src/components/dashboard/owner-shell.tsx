@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   ReceiptText,
@@ -10,6 +10,7 @@ import {
   Settings,
   PenLine,
   UtensilsCrossed,
+  LogOut,
 } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { useI18n } from "@/lib/i18n";
@@ -30,6 +31,7 @@ const NAV = [
 
 export function OwnerShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { restaurantName, logo, brandColor } = useOnboarding();
   const { t } = useI18n();
   const displayName = restaurantName || "Velvet & Stone Coffee";
@@ -64,6 +66,15 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
     );
   };
 
+  const signOut = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.replace("/auth/login");
+      router.refresh();
+    }
+  };
+
   return (
     <div className="min-h-dvh bg-background text-foreground">
       {/* Desktop sidebar */}
@@ -90,6 +101,14 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
             <PenLine className="w-4 h-4" />
             <span>{t("owner_editMenu")}</span>
           </Link>
+          <button
+            type="button"
+            onClick={signOut}
+            className="w-full flex items-center gap-3 mx-0 px-3 py-2 rounded-lg text-sm text-white/50 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Sign out</span>
+          </button>
           <div className="flex justify-center py-2 px-1 rounded-lg bg-white/[0.03] border border-white/5">
             <LangCurSwitcher className="scale-[0.95] origin-center" />
           </div>

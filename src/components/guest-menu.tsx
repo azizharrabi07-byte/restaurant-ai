@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   Search,
   Plus,
@@ -121,10 +122,9 @@ export function GuestMenu({
         body: JSON.stringify({
           slug: r.slug,
           tableToken: window.location.pathname.split("/").pop() ?? "",
+          clientRef: crypto.randomUUID(),
           items: cartItems.map((i) => ({
             productId: i.product.id,
-            name: i.product.name,
-            price: i.product.price,
             qty: i.qty,
           })),
         }),
@@ -135,12 +135,14 @@ export function GuestMenu({
         setCart({});
         setCartOpen(false);
       } else {
-        window.alert(
-          data.message ?? t("g_counterError"),
+        toast.error(
+          typeof data.message === "string" && data.message
+            ? data.message
+            : t("g_counterError"),
         );
       }
     } catch {
-      window.alert(t("g_networkError"));
+      toast.error(t("g_networkError"));
     } finally {
       setSubmitting(false);
     }

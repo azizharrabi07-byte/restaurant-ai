@@ -38,29 +38,55 @@ export default function OverviewPage() {
     );
   }, [lang]);
 
-  const paid = orders.filter((o) => o.status === "paid");
-  const accepted = orders.filter((o) => o.status === "accepted");
-  const pending = orders.filter((o) => o.status === "pending");
+  // "Today" must mean today: the API returns the last 60 orders across days,
+// so scope every KPI/chart to the local calendar day. Orders without a
+// timestamp (local demo mode) can't be dated and stay included.
+  const isTodayOrder = (o: (typeof orders)[number]): boolean => {
+    if (!o.createdAt) return true;
+    const d = new Date(o.createdAt);
+    if (Number.isNaN(d.getTime())) return true;
+    const now = new Date();
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    );
+  };
+  const todayOrders = orders.filter(isTodayOrder);
+
+  const paid = todayOrders.filter((o) => o.status === "paid");
+  const accepted = todayOrders.filter((o) => o.status === "accepted");
+  const pending = todayOrders.filter((o) => o.status === "pending");
   const revenue = paid.reduce((sum, o) => sum + o.total, 0);
   const avgOrder = paid.length ? revenue / paid.length : 0;
 
   const recent = [...orders].sort((a, b) => b.number - a.number).slice(0, 5);
 
+  // Localize wall-clock hours from the order timestamps when available
+  // (the server frequently runs in UTC; the dashboard renders in local tz).
+  const hourOf = (o: (typeof orders)[number]): number => {
+    if (o.createdAt) {
+      const d = new Date(o.createdAt);
+      if (!Number.isNaN(d.getTime())) return d.getHours();
+    }
+    return o.hour;
+  };
+
   const hours = Array.from({ length: 16 }, (_, i) => 8 + i);
   const revenueByHour = hours.map((h) => ({
     hour: String(h).padStart(2, "0"),
-    value: paid.reduce((sum, o) => (o.hour === h ? sum + o.total : sum), 0),
+    value: paid.reduce((sum, o) => (hourOf(o) === h ? sum + o.total : sum), 0),
   }));
   const ordersByHour = hours.map((h) => ({
     hour: String(h).padStart(2, "0"),
-    value: orders.filter((o) => o.hour === h).length,
+    value: todayOrders.filter((o) => hourOf(o) === h).length,
   }));
-  const peak = orders.length
+  const peak = todayOrders.length
     ? ordersByHour.reduce((a, b) => (b.value > a.value ? b : a))
     : null;
   const bestSellers = (() => {
     const counts = new Map<string, { qty: number; revenue: number }>();
-    for (const o of orders) {
+    for (const o of todayOrders) {
       for (const it of o.items) {
         const cur = counts.get(it.name) ?? { qty: 0, revenue: 0 };
         cur.qty += it.qty;
@@ -100,7 +126,7 @@ export default function OverviewPage() {
           icon={Wallet}
           accent={brandColor.value}
         />
-        <StatCard label={t("ov_totalOrders")} value={orders.length} sub={t("ov_today")} icon={ReceiptText} />
+        <StatCard label={t("ov_totalOrders")} value={todayOrders.length} sub={t("ov_today")} icon={ReceiptText} />
         <StatCard
           label={t("status_pending")}
           value={pending.length}

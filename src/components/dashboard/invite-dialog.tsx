@@ -40,18 +40,50 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
   const [role, setRole] = useState<WorkerRole>("Cashier");
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const displayName = restaurantName || "Velvet & Stone Coffee";
+  // Server-minted links carry no role/name in the URL: the accept page reads
+  // everything from the server. Local (demo) links keep the legacy params.
+  const [localLink, setLocalLink] = useState(false);
   const link = token
-    ? `${appBaseUrl()}/worker/invite/${token}?role=${role}&r=${encodeURIComponent(
-        displayName,
-      )}&b=${encodeURIComponent(brandColor.value)}`
+    ? localLink
+      ? `${appBaseUrl()}/worker/invite/${token}?role=${role}&r=${encodeURIComponent(
+          displayName,
+        )}&b=${encodeURIComponent(brandColor.value)}`
+      : `${appBaseUrl()}/worker/invite/${token}`
     : "";
 
-  const handleGenerate = () => {
-    const t = makeToken("invite");
-    setToken(t);
-    createInvite(role, t);
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setServerError(null);
+    try {
+      const res = await fetch("/api/auth/worker/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const data = (await res.json()) as { cloud?: boolean; inviteToken?: string; error?: string };
+      if (res.ok && data.cloud && typeof data.inviteToken === "string") {
+        setLocalLink(false);
+        setToken(data.inviteToken);
+        return;
+      }
+      if (res.status === 401) {
+        setServerError(t("inv_needLogin"));
+        return;
+      }
+      throw new Error(data.error ?? "invite failed");
+    } catch {
+      // Offline/demo mode: fall back to a local-only invite.
+      const t = makeToken("invite");
+      setLocalLink(true);
+      setToken(t);
+      createInvite(role, t);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleCopy = async () => {
@@ -66,6 +98,8 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
       setToken(null);
       setRole("Cashier");
       setCopied(false);
+      setLocalLink(false);
+      setServerError(null);
     }
   };
 
@@ -103,9 +137,12 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                 <p className="text-xs text-white/40 leading-relaxed">{t(ROLE_META[role].hintKey)}</p>
               </div>
 
-              <Button type="button" className="w-full font-bold" onClick={handleGenerate}>
-                {t("inv_generate")}
+              <Button type="button" className="w-full font-bold" onClick={handleGenerate} disabled={generating}>
+                {generating ? t("inv_working") ?? "Working…" : t("inv_generate")}
               </Button>
+              {serverError && (
+                <p className="text-center text-xs text-red-400 leading-relaxed">{serverError}</p>
+              )}
               <p className="text-center text-[10px] font-mono uppercase tracking-widest text-white/35">
                 {t("inv_expiresAuto")}
               </p>
@@ -162,6 +199,7 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                 onClick={() => {
                   setToken(null);
                   setRole("Cashier");
+                  setLocalLink(false);
                 }}
               >
                 {t("inv_createAnother")}

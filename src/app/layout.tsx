@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ToasterProvider } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
+import { AuthHashForwarder } from "@/components/auth-hash-forwarder";
 
 export const metadata: Metadata = {
   title: "Sufra — QR Menu for Restaurants",
@@ -26,6 +27,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased">
         <ToasterProvider />
+        <AuthHashForwarder />
         <Providers>{children}</Providers>
       </body>
     </html>
