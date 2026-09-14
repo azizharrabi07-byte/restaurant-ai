@@ -49,12 +49,45 @@ Coca 5`);
     expect(q.ok).toBe(true);
   });
 
-  it("rejects a headingless menu with 3+ item lines (degraded signature)", () => {
-    const q = assessOcrQuality("Cappuccino 4.5\nSalade 6\nPizza 12");
-    expect(q.ok).toBe(false);
-    expect(q.reason).toBe("NO_STRUCTURE");
+  it("accepts a headingless 3-item price board", () => {
+    // EXECUTED counterexample: this is a real food-truck / small-café menu, and
+    // `parseOcrMarkdown` structures it as [{name:"Menu", items:[…]}]. Treating it
+    // as the "degraded" signature failed the whole scan after three PAID OCR
+    // calls, so it is an accept (OCR-05). The old assertion encoded the wrong
+    // behaviour; use the exact input the audit executed.
+    const q = assessOcrQuality("Café 2\nThé 2\nJus 3");
+    expect(q.ok).toBe(true);
+    expect(q.reason).toBeNull();
     expect(q.items).toBe(3);
     expect(q.headings).toBe(0);
+    expect(q.priced).toBe(3);
+  });
+
+  it("counts a bold heading as a heading", () => {
+    // Mistral commonly emits "**Nos Boissons**"; HEADING_RE only knew "#".
+    const q = assessOcrQuality("**Nos Boissons**\nCafé 2\nThé 2\nJus 3");
+    expect(q.ok).toBe(true);
+    expect(q.headings).toBe(1);
+    expect(q.items).toBe(3);
+  });
+
+  it("accepts a #### heading instead of reading it as an item", () => {
+    // `#{1,3}` made "#### Starters" an item, and the menu looked headingless.
+    const q = assessOcrQuality("#### Starters\nBrik 4\nSalade 6\nOjja 8");
+    expect(q.ok).toBe(true);
+    expect(q.headings).toBe(1);
+    expect(q.items).toBe(3);
+  });
+
+  it("still rejects content that carries no menu shape at all", () => {
+    // The narrow case that remains: several content lines, not one heading and
+    // NOT ONE price — prose, not a menu.
+    const q = assessOcrQuality(
+      "Bonjour et bienvenue chez nous\nNous sommes ouverts tous les jours\nMerci de votre visite",
+    );
+    expect(q.ok).toBe(false);
+    expect(q.reason).toBe("NO_STRUCTURE");
+    expect(q.priced).toBe(0);
   });
 
   it("rejects empty text", () => {

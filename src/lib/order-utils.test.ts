@@ -197,6 +197,20 @@ describe("computeOrderTotal", () => {
     expect(computeOrderTotal([{ price: 0.1, qty: 3 }])).toBeCloseTo(0.3, 10);
   });
 
+  it("preserves millime precision across a mixed 3-decimal basket", () => {
+    const total = computeOrderTotal([
+      { price: 4.755, qty: 1 },
+      { price: 1.115, qty: 2 },
+      { price: 0.001, qty: 3 },
+    ]);
+    expect(total).toBeCloseTo(6.988, 10);
+  });
+
+  it("rejects an empty line list and a non-positive total", () => {
+    expect(() => computeOrderTotal([])).toThrow();
+    expect(() => computeOrderTotal([{ price: 0, qty: 1 }])).toThrow();
+  });
+
   it("rejects negative / non-finite prices", () => {
     expect(() => computeOrderTotal([{ price: -1, qty: 1 }])).toThrow();
     expect(() => computeOrderTotal([{ price: NaN, qty: 1 }])).toThrow();
@@ -211,9 +225,11 @@ describe("computeOrderTotal", () => {
 });
 
 describe("lineTotal", () => {
-  it("rounds to 2 decimals", () => {
+  it("rounds to millime (3-decimal) precision", () => {
     expect(lineTotal(0.1, 3)).toBeCloseTo(0.3, 10);
-    expect(lineTotal(12.345, 1)).toBe(12.35);
+    expect(lineTotal(4.755, 1)).toBe(4.755);
+    expect(lineTotal(12.345, 1)).toBe(12.345);
+    expect(lineTotal(4.755, 2)).toBe(9.51);
   });
 });
 
@@ -238,5 +254,36 @@ describe("customLineSchema", () => {
     expect(customLineSchema.safeParse({ name: "Chai", price: 0, qty: 1 }).success).toBe(false);
     expect(customLineSchema.safeParse({ name: "", price: 1, qty: 1 }).success).toBe(false);
     expect(customLineSchema.safeParse({ name: "Chai", price: 1.5, qty: 0 }).success).toBe(false);
+  });
+});
+
+describe("table selector by caller", () => {
+  const catalog = { productId: "00000000-0000-4000-8000-000000000001", qty: 1 };
+  const manual = { name: "Off-menu", price: 2.5, qty: 1 };
+
+  it("accepts a worker body that addresses the table by number", () => {
+    const r = validateOrderBody(
+      { slug: "s", tableNumber: 3, items: [catalog, manual] },
+      { allowCustomLines: true },
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.tableNumber).toBe(3);
+      expect(r.tableToken).toBeUndefined();
+    }
+  });
+
+  it("still rejects a guest that presents only a table number", () => {
+    const r = validateOrderBody(
+      { slug: "s", tableNumber: 3, items: [catalog] },
+      { allowCustomLines: false },
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects a worker body with neither selector", () => {
+    expect(
+      validateOrderBody({ slug: "s", items: [catalog] }, { allowCustomLines: true }).ok,
+    ).toBe(false);
   });
 });

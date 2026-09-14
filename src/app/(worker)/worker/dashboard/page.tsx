@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { BellRing, Plus } from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
-import { useOrders } from "@/lib/use-orders";
+import { orderSaveError, useOrders } from "@/lib/use-orders";
 import { cn } from "@/lib/utils";
 import type { OrderStatus } from "@/lib/constants";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -47,12 +47,13 @@ const COLUMNS: {
 
 export default function WorkerDashboardPage() {
   const { restaurantName, workerSession } = useOnboarding();
-  const { orders, acceptOrder, markOrderPaid } = useOrders();
+  const { orders, acceptOrder, markOrderPaid, live, stale, revert } = useOrders();
   const { t } = useI18n();
   const [newOrderOpen, setNewOrderOpen] = useState(false);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const venue = restaurantName || "Velvet & Stone Coffee";
+  const venue = restaurantName || t("ob_yourCafe");
 
   useEffect(() => {
     if (typeof Notification !== "undefined") setNotifPerm(Notification.permission);
@@ -77,17 +78,42 @@ export default function WorkerDashboardPage() {
       .filter((o) => !(status === "accepted" && isEngagedByOther(o)))
       .sort((a, b) => b.number - a.number);
 
-  const handleAccept = (id: string) => {
-    acceptOrder(id, {
-      acceptedBy: workerSession?.id ?? undefined,
-      acceptedByName: workerSession?.name ?? undefined,
-    });
-    toast.success(t("wd_acceptToast"), { description: t("wd_acceptToastDesc") });
+  const handleAccept = async (id: string) => {
+    if (busyId === id) return;
+    setBusyId(id);
+    try {
+      const res = await acceptOrder(id, {
+        acceptedBy: workerSession?.id ?? undefined,
+        acceptedByName: workerSession?.name ?? undefined,
+      });
+      // Demo mode has no server to answer, so only a cloud mutation can fail.
+      if (live && (!res || !res.ok)) {
+        revert();
+        const detail = await orderSaveError(res);
+        toast.error(detail ? t("ord_saveFailed", { msg: detail }) : t("ord_offline"));
+        return;
+      }
+      toast.success(t("wd_acceptToast"), { description: t("wd_acceptToastDesc") });
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const handlePaid = (id: string) => {
-    markOrderPaid(id);
-    toast.success(t("wd_paidToast"), { description: t("wd_paidToastDesc") });
+  const handlePaid = async (id: string) => {
+    if (busyId === id) return;
+    setBusyId(id);
+    try {
+      const res = await markOrderPaid(id);
+      if (live && (!res || !res.ok)) {
+        revert();
+        const detail = await orderSaveError(res);
+        toast.error(detail ? t("ord_saveFailed", { msg: detail }) : t("ord_offline"));
+        return;
+      }
+      toast.success(t("wd_paidToast"), { description: t("wd_paidToastDesc") });
+    } finally {
+      setBusyId(null);
+    }
   };
 
   // UI hint only — the server re-checks the role on every PATCH. Cashiers
@@ -121,6 +147,12 @@ export default function WorkerDashboardPage() {
           </>
         }
       />
+
+      {stale && (
+        <p className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-300 leading-relaxed">
+          {t("off_staleData")}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {COLUMNS.map((col) => {
@@ -159,6 +191,7 @@ export default function WorkerDashboardPage() {
                         order={order}
                         onAccept={handleAccept}
                         onPaid={canMarkPaid ? handlePaid : undefined}
+                        disabled={busyId === order.id}
                       />
                     ))}
                 </div>

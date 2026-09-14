@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { createSessionAuthClient, supabaseAdmin } from "@/lib/supabase-admin";
 import { setOwnerSessionCookie } from "@/lib/owner-auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   if (!rate.ok) {
     return NextResponse.json(
       { cloud: false, error: "RATE_LIMITED", message: `try again in ${rate.retryAfterSeconds}s` },
-      { status: 429 },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } },
     );
   }
 
@@ -35,7 +35,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ cloud: false, error: "BAD_BODY", message: first?.message ?? "Invalid input." }, { status: 400 });
   }
 
-  const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+  // Throwaway client: `signInWithPassword` stores the session on the client it
+  // is called on, and supabase-js then sends that session's token on every
+  // later REST request from the same client. Using the shared `supabaseAdmin`
+  // here would silently re-authenticate the entire server process as this user.
+  // See the header of src/lib/supabase-admin.ts.
+  const auth = createSessionAuthClient();
+  const { data, error } = await auth!.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
   });

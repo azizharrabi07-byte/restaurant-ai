@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { createSessionAuthClient, supabaseAdmin } from "@/lib/supabase-admin";
 import { setOwnerSessionCookie } from "@/lib/owner-auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -42,7 +42,13 @@ export async function POST(req: Request) {
   }
   const { token_hash, type, password } = parsed.data;
 
-  const { data: verified, error: verifyErr } = await supabaseAdmin.auth.verifyOtp({
+  // Throwaway client: `verifyOtp` and `signInWithPassword` both install the
+  // resulting session on the client they are called on, and supabase-js then
+  // sends that session's token on every later REST request from it. On the
+  // shared `supabaseAdmin` that would re-authenticate this whole process as the
+  // recovered user. See the header of src/lib/supabase-admin.ts.
+  const auth = createSessionAuthClient();
+  const { data: verified, error: verifyErr } = await auth!.auth.verifyOtp({
     token_hash,
     type,
   });
@@ -64,7 +70,7 @@ export async function POST(req: Request) {
   }
 
   const res = NextResponse.json({ cloud: true });
-  const { data: sessionData, error: sessionErr } = await supabaseAdmin.auth.signInWithPassword({
+  const { data: sessionData, error: sessionErr } = await auth!.auth.signInWithPassword({
     email: verified.user.email,
     password,
   });

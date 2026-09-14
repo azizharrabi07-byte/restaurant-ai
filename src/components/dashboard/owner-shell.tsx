@@ -34,7 +34,7 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { restaurantName, logo, brandColor } = useOnboarding();
   const { t } = useI18n();
-  const displayName = restaurantName || "Velvet & Stone Coffee";
+  const displayName = restaurantName || t("ob_yourCafe");
 
   const isActive = (item: (typeof NAV)[number]) =>
     item.exact ? pathname === item.href : pathname.startsWith(item.href);

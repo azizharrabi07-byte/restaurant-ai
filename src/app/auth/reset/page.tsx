@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, UtensilsCrossed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useI18n } from "@/lib/i18n";
 
 type Phase = "resolve" | "password" | "done" | "invalid";
 
@@ -28,12 +29,14 @@ function parseHash(): Record<string, string> {
 function ResetForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>("resolve");
   const [tokenHash, setTokenHash] = useState<string | null>(null);
   const [linkType, setLinkType] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // A key, not a string: the message then follows a language switch too.
+  const [errorKey, setErrorKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Resolve the entry shape: implicit fragment (#access_token=…) from a
@@ -47,7 +50,7 @@ function ResetForm() {
 
       if (hash.error) {
         if (!cancelled) {
-          setError("This link is invalid or expired. Request a new one.");
+          setErrorKey("au_invalidExpired");
           setPhase("invalid");
         }
         return;
@@ -63,13 +66,15 @@ function ResetForm() {
               ...(hash.refresh_token ? { refresh_token: hash.refresh_token } : {}),
             }),
           });
-          const data = (await res.json()) as { cloud?: boolean; message?: string };
-          if (!res.ok || !data.cloud) throw new Error(data.message ?? "Link verification failed.");
+          const data: unknown = await res.json().catch(() => null);
+          const accepted =
+            data && typeof data === "object" && "cloud" in data && data.cloud === true;
+          if (!res.ok || !accepted) throw new Error("verify failed");
           window.history.replaceState(null, "", window.location.pathname);
           if (!cancelled) setPhase("password");
-        } catch (e) {
+        } catch {
           if (!cancelled) {
-            setError(e instanceof Error ? e.message : "Link verification failed.");
+            setErrorKey("au_verifyFailed");
             setPhase("invalid");
           }
         }
@@ -93,9 +98,9 @@ function ResetForm() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setErrorKey(null);
     if (password !== confirm) {
-      setError("Passwords do not match.");
+      setErrorKey("au_mismatch");
       return;
     }
     setSubmitting(true);
@@ -113,16 +118,19 @@ function ResetForm() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ password }),
           });
-      const data = (await res.json()) as { cloud?: boolean; message?: string };
-      if (!res.ok || !data.cloud) {
-        setError(data.message ?? "Something went wrong.");
+      const data: unknown = await res.json().catch(() => null);
+      const accepted = data && typeof data === "object" && "cloud" in data && data.cloud === true;
+      if (!res.ok || !accepted) {
+        // The server's own message is English; the localized copy is what the
+        // owner reads, and the code is already the actionable part.
+        setErrorKey("au_genericError");
         return;
       }
       setPhase("done");
       router.replace("/dashboard");
       router.refresh();
     } catch {
-      setError("Network error. Please try again.");
+      setErrorKey("au_networkError");
     } finally {
       setSubmitting(false);
     }
@@ -141,32 +149,32 @@ function ResetForm() {
         <div className="bg-[#0D0D0D] border border-white/10 rounded-2xl p-6">
           {phase === "resolve" && (
             <p className="text-xs text-white/40 text-center py-6 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" /> Verifying your link…
+              <Loader2 className="w-4 h-4 animate-spin" /> {t("au_verifying")}
             </p>
           )}
 
           {phase === "invalid" && (
             <>
-              <h1 className="font-serif italic text-2xl">Invalid link</h1>
+              <h1 className="font-serif italic text-2xl">{t("au_invalidTitle")}</h1>
               <p className="text-xs text-white/40 mt-2 leading-relaxed">
-                {error ?? "This reset link is missing or malformed. Request a new one."}
+                {t(errorKey ?? "au_invalidDesc")}
               </p>
               <Link href="/auth/forgot" className="mt-4 inline-block">
-                <Button variant="outline" size="sm">Request new link</Button>
+                <Button variant="outline" size="sm">{t("au_requestNew")}</Button>
               </Link>
             </>
           )}
 
           {phase === "password" && (
             <>
-              <h1 className="font-serif italic text-2xl">Set a new password</h1>
+              <h1 className="font-serif italic text-2xl">{t("au_newTitle")}</h1>
               <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
-                Choose a password of at least 8 characters.
+                {t("au_newDesc")}
               </p>
               <form onSubmit={submit} className="mt-6 space-y-3">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono">
-                    New password
+                  <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono block text-start">
+                    {t("au_newLabel")}
                   </label>
                   <Input
                     type="password"
@@ -180,8 +188,8 @@ function ResetForm() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono">
-                    Confirm password
+                  <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono block text-start">
+                    {t("au_confirmLabel")}
                   </label>
                   <Input
                     type="password"
@@ -194,10 +202,12 @@ function ResetForm() {
                     autoComplete="new-password"
                   />
                 </div>
-                {error && <p className="text-xs text-red-400 leading-relaxed">{error}</p>}
+                {errorKey && (
+                  <p className="text-xs text-red-400 leading-relaxed">{t(errorKey)}</p>
+                )}
                 <Button type="submit" className="w-full mt-1" disabled={submitting}>
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Set password & sign in
+                  {t("au_setPassword")}
                 </Button>
               </form>
             </>
@@ -209,12 +219,13 @@ function ResetForm() {
 }
 
 export default function ResetPage() {
+  const { t } = useI18n();
   return (
     <Suspense
       fallback={
         <div className="min-h-dvh bg-[#050505] text-white flex items-center justify-center">
           <p className="text-xs font-mono uppercase tracking-widest text-white/40 animate-pulse">
-            Loading…
+            {t("common_loading")}
           </p>
         </div>
       }

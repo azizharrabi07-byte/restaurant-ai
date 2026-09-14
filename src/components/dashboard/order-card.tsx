@@ -9,10 +9,16 @@ interface OrderCardProps {
   order: Order;
   onAccept?: (id: string) => void;
   onPaid?: (id: string) => void;
+  /**
+   * True while a mutation for this order is in flight. The optimistic update
+   * removes the button on the first tap, but a failed request reverts it — so
+   * without this a second tap fires a duplicate PATCH.
+   */
+  disabled?: boolean;
   className?: string;
 }
 
-export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps) {
+export function OrderCard({ order, onAccept, onPaid, disabled, className }: OrderCardProps) {
   const { t, plural, formatPrice } = useI18n();
   const totalQty = order.items.reduce((sum, i) => sum + i.qty, 0);
 
@@ -49,7 +55,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
         {order.items.map((item, i) => (
           <div key={i} className="flex items-center justify-between gap-3 text-xs">
             <span className="text-white/70 truncate">
-              <span className="font-mono text-white/40 mr-2">{item.qty}×</span>
+              <span className="font-mono text-white/40 me-2">{item.qty}×</span>
               {item.name}
             </span>
             <span className="text-white/50 font-mono shrink-0">
@@ -75,6 +81,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               type="button"
               size="sm"
               className="flex-1 font-bold"
+              disabled={disabled}
               onClick={() => onAccept(order.id)}
             >
               <Sparkles className="w-3.5 h-3.5 text-black" />
@@ -87,6 +94,7 @@ export function OrderCard({ order, onAccept, onPaid, className }: OrderCardProps
               size="sm"
               variant="secondary"
               className="flex-1"
+              disabled={disabled}
               onClick={() => onPaid(order.id)}
             >
               <Check className="w-3.5 h-3.5 text-emerald-400" />

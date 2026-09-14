@@ -26,7 +26,13 @@ export async function GET(
     .eq("is_used", false)
     .maybeSingle();
 
-  if (!invite || (invite.expires_at && new Date(invite.expires_at as string).getTime() < Date.now())) {
+  // A NULL `expires_at` is NOT a valid invite: require an explicit future
+  // deadline, so a row without one can never be redeemed forever.
+  if (
+    !invite ||
+    !invite.expires_at ||
+    new Date(invite.expires_at as string).getTime() < Date.now()
+  ) {
     return NextResponse.json({ cloud: false, error: "NOT_FOUND" }, { status: 404 });
   }
 

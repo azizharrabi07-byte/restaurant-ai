@@ -114,6 +114,12 @@ function Header() {
       </div>
       <div className="flex items-center gap-3">
         <Switcher />
+        <Link
+          href="/auth/login"
+          className="text-xs font-mono uppercase tracking-wider text-white/40 hover:text-white transition-colors"
+        >
+          {t("au_signIn")}
+        </Link>
         <Link href="/onboarding">
           <Button size="sm" className="font-bold">
             {t("nav_open")}

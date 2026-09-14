@@ -4,10 +4,17 @@ import {
   attachOwnerSessionRotation,
   getOwnerSessionForRequest,
 } from "@/lib/owner-auth";
-import { getWorkerSession } from "@/lib/worker-auth";
-import { canMarkPaid, normalizeStaffRole } from "@/lib/worker-permissions";
+import {
+  DEV_WORKER_SENTINEL_ID,
+  getWorkerSession,
+} from "@/lib/worker-auth";
+import {
+  canAcceptOrder,
+  canMarkPaid,
+  canSetArbitraryStatus,
+  normalizeStaffRole,
+} from "@/lib/worker-permissions";
 
-const VALID_STATUSES = new Set(["pending", "accepted"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** True only for "column does not exist" (pre-migration fallback trigger). */
@@ -32,6 +39,8 @@ export async function PATCH(
   }
 
   const { id } = await params;
+  // `acceptedByName` is accepted on the wire but deliberately ignored: the
+  // display name is read from the resolved worker row, never from the client.
   let body: { status?: string; isPaid?: boolean; acceptedBy?: string; acceptedByName?: string };
   try {
     body = await req.json();
@@ -71,7 +80,7 @@ export async function PATCH(
   // Role matrix (server-enforced; the client role is UI hint only):
   // owner   → accept, paid, reopen
   // manager → accept, paid
-  // cashier → accept only (never paid)
+  // cashier → accept only (never paid, never reopen)
   const role = normalizeStaffRole(workerSession ? workerSession.role : "Owner") ?? "Cashier";
   const wantsPaid = body.status === "paid" || body.isPaid === true;
   if (wantsPaid && !canMarkPaid(role)) {
@@ -79,37 +88,60 @@ export async function PATCH(
   }
 
   const updates: Record<string, unknown> = {};
-  if (body.status) {
-    if (body.status === "paid") {
-      // The orders table only allows pending/accepted — payment is tracked
-      // via the is_paid boolean.
-      updates.is_paid = true;
-    } else if (VALID_STATUSES.has(body.status)) {
-      updates.status = body.status;
+  if (body.status === "paid") {
+    // The orders table only allows pending/accepted — payment is tracked
+    // via the is_paid boolean.
+    updates.is_paid = true;
+  } else if (body.status === "accepted") {
+    if (canAcceptOrder(role)) updates.status = "accepted";
+  } else if (body.status === "pending") {
+    // Reopening rewinds the order to the pending column and re-notifies the
+    // kitchen; owners alone may rewrite an order's state. Without this gate a
+    // cashier could push an already-paid order back to pending while `is_paid`
+    // stayed true — a state no dashboard renders.
+    if (!canSetArbitraryStatus(role)) {
+      return NextResponse.json(
+        { cloud: false, error: "FORBIDDEN", message: "Your role cannot reopen orders." },
+        { status: 403 },
+      );
     }
+    updates.status = "pending";
   }
-  if (body.isPaid === true) updates.is_paid = true;
-  if (updates.is_paid === true) updates.paid_at = new Date().toISOString();
 
   // Worker attribution comes from the VERIFIED session, never from the body
-  // (a worker must not be able to credit someone else). Owners may pass a
-  // worker id, which must be a UUID — anything else is rejected, not stored.
-  if (updates.status === "accepted") {
-    if (workerSession) {
-      updates.accepted_by = workerSession.workerId;
-      updates.accepted_by_name = workerSession.fullName;
-    } else if (body.acceptedBy !== undefined) {
-      if (!UUID_RE.test(body.acceptedBy)) {
-        return NextResponse.json({ cloud: false, error: "BAD_BODY", message: "acceptedBy must be a worker id." }, { status: 400 });
-      }
-      updates.accepted_by = body.acceptedBy;
-      if (body.acceptedByName !== undefined) {
-        if (typeof body.acceptedByName !== "string" || body.acceptedByName.length > 80) {
-          return NextResponse.json({ cloud: false, error: "BAD_BODY", message: "acceptedByName is invalid." }, { status: 400 });
-        }
-        updates.accepted_by_name = body.acceptedByName;
-      }
+  // (a worker must not be able to credit someone else). An owner may credit a
+  // worker, but only one that belongs to THIS order's restaurant: the id is
+  // resolved against the DB and the display name comes from that row, never
+  // from the client body.
+  //
+  // The dev-bypass session resolves to a sentinel id that exists in no table,
+  // so it must never be written as attribution — the branch simply falls
+  // through, leaving `accepted_by` unset (dev and prod agree).
+  if (
+    updates.status === "accepted" &&
+    workerSession &&
+    workerSession.workerId !== DEV_WORKER_SENTINEL_ID
+  ) {
+    updates.accepted_by = workerSession.workerId;
+    updates.accepted_by_name = workerSession.fullName;
+  } else if (updates.status === "accepted" && body.acceptedBy !== undefined) {
+    if (typeof body.acceptedBy !== "string" || !UUID_RE.test(body.acceptedBy)) {
+      return NextResponse.json({ cloud: false, error: "BAD_BODY", message: "acceptedBy must be a worker id." }, { status: 400 });
     }
+    const { data: workerRow } = await supabaseAdmin
+      .from("workers")
+      .select("id, full_name")
+      .eq("id", body.acceptedBy)
+      .eq("restaurant_id", order.restaurant_id)
+      .maybeSingle();
+    if (!workerRow) {
+      return NextResponse.json(
+        { cloud: false, error: "BAD_BODY", message: "acceptedBy is not a worker of this restaurant." },
+        { status: 400 },
+      );
+    }
+    updates.accepted_by = workerRow.id as string;
+    updates.accepted_by_name = (workerRow.full_name as string | null) ?? null;
   }
 
   if (Object.keys(updates).length === 0) {

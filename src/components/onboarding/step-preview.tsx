@@ -13,10 +13,12 @@ import {
   Copy,
   CloudUpload,
   Info,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PhoneMockup } from "@/components/phone-mockup";
 import { useOnboarding } from "@/lib/onboarding-store";
+import { appBaseUrl, slugify } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { toast } from "sonner";
 
@@ -26,13 +28,75 @@ interface StepPreviewProps {
 }
 
 export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
-  const { restaurantName, logo, brandColor, categories, products, cover, theme } =
-    useOnboarding();
+  const {
+    restaurantName,
+    logo,
+    brandColor,
+    categories,
+    products,
+    cover,
+    theme,
+    saveNow,
+    savingState,
+    lastSaveError,
+    isCloud,
+    hydrationFailed,
+    restaurantSlug,
+    tables,
+  } = useOnboarding();
   const { t } = useI18n();
   const [finished, setFinished] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
-  const handleFinish = () => {
+  // The badge states a fact about the server, so it may only claim it once the
+  // server has confirmed the menu: a local save is not "live" (FE-11).
+  const isLive = isCloud && savingState === "saved";
+
+  // The one URL a guest can actually open: this app's own origin plus the
+  // real guest route, with a token that exists. There is no `menuos.app`
+  // domain anywhere in this product (FE-10).
+  const menuSlug = restaurantSlug ?? slugify(restaurantName || "");
+  const liveToken = tables[0]?.token ?? null;
+  const scanUrl = isCloud && liveToken ? `${appBaseUrl()}/menu/${menuSlug}/${liveToken}` : null;
+
+  const statusTone = hydrationFailed
+    ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+    : savingState === "error"
+      ? "bg-red-500/10 text-red-400 border-red-500/20"
+      : isLive
+        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+        : "bg-white/5 text-white/70 border-white/10";
+  const statusLabel = hydrationFailed
+    ? t("save_hydrationFailed")
+    : savingState === "error"
+      ? t("save_failed")
+      : isLive
+        ? t("prv_ready")
+        : t("prv_notLive");
+  // The wizard has no SaveStatus pill of its own, so the banner carries both
+  // the state and the server's reason for refusing.
+  const statusReason = hydrationFailed
+    ? t("save_hydrationFailed")
+    : savingState === "error"
+      ? lastSaveError?.message || t("save_errorNetwork")
+      : null;
+
+  const handleFinish = async () => {
+    if (finishing) return;
+    setFinishing(true);
+    // The wizard's last step claims the menu is published: ask the server
+    // first, and only report success on its answer (FE-11).
+    const failure = await saveNow();
+    setFinishing(false);
+    if (failure) {
+      setFinished(false);
+      toast.error(t("save_failed"), {
+        description: failure.message,
+        duration: 6000,
+      });
+      return;
+    }
     setFinished(true);
     toast.success(t("prv_doneToast"), {
       description: t("prv_doneToastDesc"),
@@ -40,11 +104,15 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
     });
   };
 
-  const handleCopy = () => {
-    const url = `${restaurantName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-") || "my-cafe"}.menuos.app`;
-    navigator.clipboard.writeText(`https://${url}`);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 2000);
+  const handleCopy = async () => {
+    if (!scanUrl) return;
+    try {
+      await navigator.clipboard.writeText(scanUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    } catch {
+      toast.error(t("prv_copyFailed"));
+    }
   };
 
   const checklist = [
@@ -83,19 +151,19 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
   ];
 
   return (
-    <div className="max-w-6xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300 pb-12">
+    <div className="max-w-6xl mx-auto text-start animate-in fade-in slide-in-from-bottom-2 duration-300 pb-12">
       {/* Header */}
       <div className="mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <p className="text-[10px] uppercase tracking-widest text-white/40 mb-2 font-medium">
-              Step 05 · Live Preview
+              {t("prv_eyebrow")}
             </p>
             <h2 className="text-3xl sm:text-4xl font-serif italic text-white mb-2">
-              Ready for the spotlight
+              {t("prv_title")}
             </h2>
             <p className="text-white/40 max-w-xl text-sm sm:text-base leading-relaxed">
-              This is exactly what your customers will see when they scan a QR code at the table.
+              {t("prv_desc")}
             </p>
           </div>
 
@@ -115,9 +183,16 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
               <span className="text-[10px] uppercase font-mono tracking-widest text-white/40">
                 {t("prv_menuStatus")}
               </span>
-              <span className="text-[10px] uppercase font-mono tracking-wider px-2.5 py-0.5 rounded-full font-medium inline-flex items-center gap-1.5 border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {t("prv_ready")}
+              <span
+                className={`text-[10px] uppercase font-mono tracking-wider px-2.5 py-0.5 rounded-full font-medium inline-flex items-center gap-1.5 border ${statusTone}`}
+                title={statusReason ?? undefined}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isLive ? "bg-emerald-400 animate-pulse" : "bg-current"
+                  }`}
+                />
+                {statusLabel}
               </span>
             </div>
 
@@ -125,22 +200,22 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
               <p className="text-xs text-white/40">{t("prv_scanLink")}</p>
               <div className="mt-1.5 flex items-center justify-between p-2.5 rounded-lg bg-[#111111] border border-white/10 text-xs font-mono">
                 <span className="text-white/90 truncate pr-2">
-                  {restaurantName
-                    ? `https://${restaurantName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-")}.menuos.app`
-                    : "https://my-cafe.menuos.app"}
+                  {scanUrl ?? t("prv_scanPending")}
                 </span>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="text-white/40 hover:text-white p-1 hover:bg-white/5 rounded-full transition-colors cursor-pointer shrink-0"
-                  title={t("prv_copyUrl")}
-                >
-                  {copiedUrl ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                </button>
+                {scanUrl && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCopy()}
+                    className="text-white/40 hover:text-white p-1 hover:bg-white/5 rounded-full transition-colors cursor-pointer shrink-0"
+                    title={t("prv_copyUrl")}
+                  >
+                    {copiedUrl ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -200,12 +275,27 @@ export function StepPreview({ onBack, onJumpToStep }: StepPreviewProps) {
                 </Button>
               </Link>
             ) : (
-              <Button type="button" onClick={handleFinish} className="font-bold text-xs">
-                <CloudUpload className="w-3.5 h-3.5 text-black" />
+              <Button
+                type="button"
+                onClick={() => void handleFinish()}
+                disabled={finishing}
+                className="font-bold text-xs"
+              >
+                {finishing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-black" />
+                ) : (
+                  <CloudUpload className="w-3.5 h-3.5 text-black" />
+                )}
                 {t("prv_finish")}
               </Button>
             )}
           </div>
+
+          {statusReason && !finished && (
+            <p className="text-xs text-amber-300/90 leading-relaxed" role="status">
+              {statusReason}
+            </p>
+          )}
 
           <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-white/10 p-4">
             <Info className="w-4 h-4 mt-0.5 text-white/40 shrink-0" />

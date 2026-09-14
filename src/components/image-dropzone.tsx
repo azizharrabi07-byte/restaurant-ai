@@ -34,6 +34,11 @@ export function ImageDropzone({
   const [isDragging, setIsDragging] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Offline picks are previewed here only: a `data:` URL must never reach the
+  // synced menu payload (the sync guard rejects it and every later autosave
+  // would fail).
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const shown = value ?? localPreview;
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || !files[0] || uploading) return;
@@ -49,24 +54,32 @@ export function ImageDropzone({
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
-      if (res.ok) {
-        const json = (await res.json()) as { cloud?: boolean; url?: string };
-        if (json.cloud && typeof json.url === "string") {
-          onChange(json.url);
-          return;
-        }
+      const res = await fetch("/api/upload", { method: "POST", body: form }).catch(
+        () => null,
+      );
+      if (!res) {
+        // Genuine network failure only (offline/unreachable): keep the editor
+        // usable with a local-only preview.
+        setLocalPreview(await downscaleImage(file));
+        toast.error(t("idz_offline"));
+        return;
       }
-      throw new Error("upload failed");
+      const json = (await res.json().catch(() => null)) as {
+        cloud?: boolean;
+        url?: string;
+        error?: string;
+        message?: string;
+      } | null;
+      if (res.ok && json?.cloud && typeof json.url === "string") {
+        setLocalPreview(null);
+        onChange(json.url);
+        return;
+      }
+      // The server answered — surface its real reason. Downgrading to a data
+      // URL here would poison the synced payload and fail every later save.
+      toast.error(json?.message ?? json?.error ?? t("idz_failed"));
     } catch {
-      // Offline/unauthenticated: fall back to a local data URL so the UI
-      // keeps working. The sync guard rejects data URLs for cloud saves.
-      try {
-        const dataUrl = await downscaleImage(file);
-        onChange(dataUrl);
-      } catch {
-        toast.error(t("idz_failed"));
-      }
+      toast.error(t("idz_failed"));
     } finally {
       setUploading(false);
     }
@@ -85,7 +98,7 @@ export function ImageDropzone({
   }[shape];
 
   return (
-    <div className={cn("w-full flex flex-col gap-2 text-left", className)}>
+    <div className={cn("w-full flex flex-col gap-2 text-start", className)}>
       <div className="flex items-center justify-between">
         {label && (
           <label className="text-[11px] uppercase tracking-widest text-white/60 font-medium">
@@ -115,6 +128,7 @@ export function ImageDropzone({
                 key={p.id}
                 type="button"
                 onClick={() => {
+                  setLocalPreview(null);
                   onChange(p.url);
                   setShowPresets(false);
                 }}
@@ -140,7 +154,7 @@ export function ImageDropzone({
         </div>
       )}
 
-      {value ? (
+      {shown ? (
         <div className="relative group inline-block">
           <div
             className={cn(
@@ -149,10 +163,11 @@ export function ImageDropzone({
             )}
           >
             <img
-              src={value}
+              src={shown}
               alt={t("idz_uploadedAlt")}
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
+              title={value ? undefined : t("idz_offline")}
             />
             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
               <button
@@ -165,7 +180,10 @@ export function ImageDropzone({
               <button
                 type="button"
                 onClick={() => {
-                  onChange(null);
+                  // A local-only preview was never stored anywhere, so dropping
+                  // it must not clear the saved image.
+                  if (value) onChange(null);
+                  setLocalPreview(null);
                   if (inputRef.current) inputRef.current.value = "";
                 }}
                 className="p-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-full text-xs font-medium border border-red-500/30 transition-colors cursor-pointer"

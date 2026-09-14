@@ -51,7 +51,7 @@ export const customLineSchema = z
   })
   .strict();
 
-export const orderBodySchema = z
+const orderBodyBaseSchema = z
   .object({
     slug: z
       .string({ invalid_type_error: "slug must be a string" })
@@ -62,7 +62,8 @@ export const orderBodySchema = z
       .string({ invalid_type_error: "tableToken must be a string" })
       .trim()
       .min(1, "tableToken must not be empty")
-      .max(200),
+      .max(200)
+      .optional(),
     tableNumber: z.number().int().min(1).max(10000).optional(),
     clientRef: z
       .string({ invalid_type_error: "clientRef must be a string" })
@@ -74,6 +75,21 @@ export const orderBodySchema = z
       .max(MAX_LINES, `items must be at most ${MAX_LINES}`),
   })
   .strip();
+
+// A guest/anonymous scanner must prove which table it is at with the QR token
+// it scanned: a table number is guessable and is not bound to a QR code.
+export const orderBodySchema = orderBodyBaseSchema.refine(
+  (b) => b.tableToken !== undefined,
+  { message: "tableToken is required", path: ["tableToken"] },
+);
+
+// Verified worker sessions are the only callers allowed to add manual lines,
+// and they may address the table by number instead (the new-order dialog picks
+// it from the table list it was given) — but exactly one selector is required.
+export const workerOrderBodySchema = orderBodyBaseSchema.refine(
+  (b) => b.tableToken !== undefined || typeof b.tableNumber === "number",
+  { message: "tableToken or tableNumber is required", path: ["tableToken"] },
+);
 
 export type CatalogOrderLine = z.infer<typeof catalogLineSchema>;
 export type CustomOrderLine = z.infer<typeof customLineSchema>;
@@ -105,7 +121,11 @@ export function validateOrderBody(
   body: unknown,
   opts: { allowCustomLines: boolean },
 ): ValidateOrderBodyResult {
-  const parsed = orderBodySchema.safeParse(body);
+  // Only a verified worker session — the very flag that allows manual lines —
+  // may address a table by number; every other caller must present the token.
+  const parsed = opts.allowCustomLines
+    ? workerOrderBodySchema.safeParse(body)
+    : orderBodySchema.safeParse(body);
   if (!parsed.success) {
     const first = parsed.error.errors[0];
     return { ok: false, error: first ? first.message : "BAD_BODY" };
@@ -157,15 +177,25 @@ export function validateOrderBody(
   };
 }
 
-/** Server-computed line item total: price × qty, rounded to 2 decimals. */
+/** Server-computed line item total: price × qty at millime precision. */
 export function lineTotal(price: number, qty: number): number {
-  return Math.round(price * qty * 100) / 100;
+  return Math.round(price * qty * 1000) / 1000;
 }
 
-/** Server-computed order total from already-approved items. Throws if absurd. */
+/**
+ * Server-computed order total from already-approved items. Throws if absurd.
+ *
+ * Contract: an order carries at least one line and a strictly positive total.
+ * Amounts are millime-precision (three decimals), matching `formatDT` and the
+ * OCR/scan importers; a zero total is rejected rather than silently accepted,
+ * so a 0-priced catalog can never produce a valid-looking free order.
+ */
 export function computeOrderTotal(
   items: { price: number; qty: number }[],
 ): number {
+  if (items.length === 0) {
+    throw new Error("order must have at least one line");
+  }
   let total = 0;
   for (const it of items) {
     if (!Number.isFinite(it.price) || it.price < 0 || !Number.isFinite(it.qty)) {
@@ -173,8 +203,8 @@ export function computeOrderTotal(
     }
     total += lineTotal(it.price, it.qty);
   }
-  total = Math.round(total * 100) / 100;
-  if (!Number.isFinite(total) || total > MAX_ORDER_TOTAL || total < 0) {
+  total = Math.round(total * 1000) / 1000;
+  if (!Number.isFinite(total) || total > MAX_ORDER_TOTAL || total <= 0) {
     throw new Error("order total out of range");
   }
   return total;

@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { setOwnerSessionCookie } from "@/lib/owner-auth";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimit, retryAfterHeaders } from "@/lib/rate-limit";
 
 const schema = z.object({
   access_token: z.string().min(10, "invalid session").max(8192),
-  refresh_token: z.string().min(10).max(8192).optional(),
+  // Required: the stored session is rotated with the refresh grant, so an
+  // access token persisted as its own refresh token would die at the access
+  // token TTL with no way to renew.
+  refresh_token: z.string({ required_error: "refresh token required" }).min(10, "invalid refresh token").max(8192),
 });
 
 /**
@@ -24,7 +27,7 @@ export async function POST(req: Request) {
   if (!rate.ok) {
     return NextResponse.json(
       { cloud: false, error: "RATE_LIMITED", message: `try again in ${rate.retryAfterSeconds}s` },
-      { status: 429 },
+      { status: 429, headers: retryAfterHeaders(rate) },
     );
   }
 
@@ -51,7 +54,7 @@ export async function POST(req: Request) {
   setOwnerSessionCookie(
     res,
     parsed.data.access_token,
-    parsed.data.refresh_token ?? parsed.data.access_token,
+    parsed.data.refresh_token,
   );
   return res;
 }

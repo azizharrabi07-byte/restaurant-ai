@@ -20,6 +20,8 @@ interface AcceptResponse {
   cloud?: boolean;
   worker?: { id: string; name: string; role: WorkerRole } | null;
   sessionToken?: string;
+  error?: string;
+  message?: string;
 }
 
 interface ServerInviteInfo {
@@ -35,7 +37,7 @@ function InviteContent() {
   const router = useRouter();
   const { invites, acceptInvite, createInvite, restaurantName, brandColor, setWorkerSession } =
     useOnboarding();
-  const { t } = useI18n();
+  const { t, lang, isAr } = useI18n();
   const [name, setName] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [serverRejected, setServerRejected] = useState(false);
@@ -43,6 +45,7 @@ function InviteContent() {
   const [mounted, setMounted] = useState(false);
   const [serverInvite, setServerInvite] = useState<ServerInviteInfo | null>(null);
   const [serverChecked, setServerChecked] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
   const token = params.token ?? "";
 
@@ -102,48 +105,93 @@ function InviteContent() {
     : ROLE_VALUES.includes(roleParam ?? "")
       ? (roleParam as WorkerRole)
       : (storeInvite?.role ?? "Cashier");
+
+  // `Cashier`/`Manager` are the stored and wire values; only their DISPLAY is
+  // translated (I18N-09). `wk_manager`/`wk_cashier` are the role NAMES — the
+  // same pair the owner workers page and the worker shell badge use.
+  // `inv_roleManager`/`inv_roleCashier` are the long role *descriptions*
+  // rendered as the paragraph further down, not labels.
+  const roleLabel = role === "Manager" ? t("wk_manager") : t("wk_cashier");
   const displayName =
     (serverInvite?.restaurantName || undefined) ??
     nameParam ??
     restaurantName ??
-    "Velvet & Stone Coffee";
+    t("ob_yourCafe");
   const accent = serverInvite?.brandColor ?? colorParam ?? brandColor.value;
-  const expiry = storeInvite?.expiresAt ?? t("inv_expires24");
+  // The stored instant is formatted for the reader (I18N-10); anything that is
+  // not a parseable instant — a legacy English literal in localStorage — falls
+  // back to the translated 24-hour copy instead of showing raw text.
+  const expiryAt = storeInvite ? new Date(storeInvite.expiresAt) : null;
+  const expiry =
+    expiryAt && !Number.isNaN(expiryAt.getTime())
+      ? new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).format(
+          Math.round((expiryAt.getTime() - Date.now()) / 3_600_000),
+          "hour",
+        )
+      : t("inv_expires24");
 
   const handleAccept = async () => {
     if (!valid || alreadyAccepted || working) return;
     const cleanName = name.trim();
     if (!cleanName) return;
     setWorking(true);
+    setAcceptError(null);
 
     // Authoritative accept happens server-side against the invite table.
     let server: AcceptResponse | null = null;
+    // The local demo path is reserved for genuinely offline conditions: the
+    // request never reached the server, or there is no backend configured.
+    // Every explicit refusal is surfaced instead of faking a join.
+    let offline = false;
     try {
       const res = await fetch("/api/auth/worker/accept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, name: cleanName }),
       });
+      const data = (await res.json().catch(() => null)) as AcceptResponse | null;
       if (res.ok) {
-        const json = (await res.json()) as AcceptResponse;
-        if (json && typeof json === "object") server = json;
+        if (data && typeof data === "object") server = data;
       } else if (res.status === 401 || res.status === 404) {
-        // The server doesn't recognize this invite. Only fall through when the
-        // invite exists in the local store (offline/demo mode); a bare URL
-        // alone must NOT grant access.
-        if (!storeInvite) {
-          setServerRejected(true);
-          setAccepted(true);
-          setWorking(false);
-          return;
-        }
+        // The server answered, so this device is not offline — it simply does
+        // not recognize the invite (unknown, expired or already used). A
+        // local-only token must never grant access on its own.
+        setServerRejected(true);
+        setAccepted(true);
+        setWorking(false);
+        return;
+      } else if (res.status === 409 && data?.error === "ALREADY_USED") {
+        setAcceptError(t("inv_alreadyUsed"));
+        setWorking(false);
+        return;
+      } else if (res.status === 503 && data?.error === "NEEDS_MIGRATION") {
+        setAcceptError(t("inv_needsMigration"));
+        setWorking(false);
+        return;
+      } else if (res.status === 503 && data?.error === "NO_BACKEND") {
+        offline = true;
+      } else if (res.status === 429) {
+        // The route sends Retry-After; fall back to the documented minute.
+        setAcceptError(t("inv_rateLimited", { s: res.headers.get("Retry-After") ?? "60" }));
+        setWorking(false);
+        return;
+      } else {
+        // Any other refusal (403/500/…) is a real error, not an offline state.
+        setAcceptError(data?.message ?? t("inv_serverError"));
+        setWorking(false);
+        return;
       }
-      // 429/503 and network failures degrade to the local demo path.
     } catch {
-      /* offline — keep local flow */
+      // The request never reached the server — keep the offline flow.
+      offline = true;
     }
 
     const serverWorker = server?.cloud ? server.worker : undefined;
+    if (!serverWorker && !offline) {
+      setAcceptError(server?.message ?? t("inv_serverError"));
+      setWorking(false);
+      return;
+    }
     if (serverWorker) {
       if (!storeInvite || storeInvite.status !== "pending") createInvite(serverWorker.role, token);
       acceptInvite(token, serverWorker.name);
@@ -159,7 +207,7 @@ function InviteContent() {
     setAccepted(true);
     setWorking(false);
     toast.success(t("inv_welcomeToast"), {
-      description: t("inv_welcomeToastDesc", { name: displayName, role }),
+      description: t("inv_welcomeToastDesc", { name: displayName, role: roleLabel }),
     });
     setTimeout(() => router.push("/worker/dashboard"), 900);
   };
@@ -210,7 +258,7 @@ function InviteContent() {
             <h1 className="mt-5 text-xl font-serif italic text-white">
               {t("inv_welcome", { name: displayName })}
             </h1>
-            <p className="mt-2 text-sm text-white/40">{t("inv_ready", { role })}</p>
+            <p className="mt-2 text-sm text-white/40">{t("inv_ready", { role: roleLabel })}</p>
           </div>
         ) : (
           <div className="rounded-2xl border border-white/10 bg-[#0D0D0D] overflow-hidden animate-fade-up">
@@ -240,7 +288,7 @@ function InviteContent() {
                   )}
                 >
                   <RoleIcon className="w-3.5 h-3.5" />
-                  {role}
+                  {roleLabel}
                 </span>
               </div>
 
@@ -274,9 +322,15 @@ function InviteContent() {
                 onClick={() => void handleAccept()}
                 disabled={working}
               >
-                {working ? t("inv_working") ?? "Working…" : t("inv_accept")}
-                {!working && <ArrowRight className="w-4 h-4 text-black" />}
+                {working ? t("inv_working") : t("inv_accept")}
+                {!working && <ArrowRight className={cn("w-4 h-4 text-black", isAr && "rotate-180")} />}
               </Button>
+
+              {acceptError && (
+                <p className="mt-3 text-center text-xs text-red-400 leading-relaxed">
+                  {acceptError}
+                </p>
+              )}
 
               <p className="mt-4 text-center text-[10px] text-white/35">
                 {t("inv_noAcc")}
@@ -289,17 +343,25 @@ function InviteContent() {
   );
 }
 
+/**
+ * Suspense fallback. This is a separate component because `useI18n` is a hook
+ * and the page shell itself has no access to it — the fallback renders before
+ * Suspense resolves, so it needs its own translated label.
+ */
+function InviteLoadingFallback() {
+  const { t } = useI18n();
+  return (
+    <div className="min-h-dvh bg-background text-foreground flex items-center justify-center">
+      <p className="text-xs font-mono uppercase tracking-widest text-white/40 animate-pulse">
+        {t("common_loading")}
+      </p>
+    </div>
+  );
+}
+
 export default function WorkerInvitePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-dvh bg-background text-foreground flex items-center justify-center">
-          <p className="text-xs font-mono uppercase tracking-widest text-white/40 animate-pulse">
-            Loading…
-          </p>
-        </div>
-      }
-    >
+    <Suspense fallback={<InviteLoadingFallback />}>
       <InviteContent />
     </Suspense>
   );

@@ -1,8 +1,12 @@
 import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/auth-form";
 import { getOwnerSessionForRsc } from "@/lib/owner-auth";
+import { translate } from "@/lib/locale";
+import { currentLang } from "@/lib/server-locale";
 
-export const metadata = { title: "Sign in — Sufra" };
+export async function generateMetadata() {
+  return { title: translate(await currentLang(), "meta_login") };
+}
 
 export default async function LoginPage() {
   const session = await getOwnerSessionForRsc();

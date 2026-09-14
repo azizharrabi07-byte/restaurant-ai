@@ -1,14 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { toast } from "sonner";
-import { Store, Palette, FolderTree, Utensils, PenLine, RefreshCw, Eraser, Info } from "lucide-react";
+import {
+  Store,
+  Palette,
+  FolderTree,
+  Utensils,
+  PenLine,
+  RefreshCw,
+  Eraser,
+  Info,
+  Link2,
+  Lock,
+} from "lucide-react";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { useI18n } from "@/lib/i18n";
 import { slugify } from "@/lib/utils";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { RestaurantLogo } from "@/components/restaurant-logo";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function SettingsPage() {
   const {
@@ -20,12 +33,43 @@ export default function SettingsPage() {
     products,
     tables,
     workers,
+    restaurantSlug,
+    setRestaurantSlug,
+    saveNow,
+    hydrationState,
     loadDemo,
     resetAll,
   } = useOnboarding();
   const { t } = useI18n();
+  const [slugDraft, setSlugDraft] = useState<string | null>(null);
+  const [savingSlug, setSavingSlug] = useState(false);
 
-  const displayName = restaurantName || "Velvet & Stone Coffee";
+  const displayName = restaurantName || t("ob_yourCafe");
+
+  // The server keeps a stored slug authoritative on update, so the field is
+  // editable only while no restaurant row exists — that is exactly the case
+  // where the first save can still fail with 409 SLUG_TAKEN, and therefore the
+  // only case where changing the address can rescue it (FE-02).
+  const slugEditable = hydrationState === "local";
+  const currentSlug = restaurantSlug ?? slugify(displayName);
+  const slugValue = slugDraft ?? currentSlug;
+
+  const commitSlug = async () => {
+    const typed = slugValue.trim();
+    if (typed.length > 63) return;
+    setSavingSlug(true);
+    // Blank hands the choice back to the server, which derives a free slug
+    // from the name (and disambiguates it if that one is taken).
+    setRestaurantSlug(typed);
+    const failure = await saveNow();
+    setSavingSlug(false);
+    if (!failure) {
+      setSlugDraft(null);
+      toast.success(t("st_slugSaved"));
+      return;
+    }
+    toast.error(t("st_slugRefused"), { description: failure.message });
+  };
 
   return (
     <>
@@ -53,7 +97,7 @@ export default function SettingsPage() {
             <div className="min-w-0 flex-1">
               <p className="text-lg font-serif italic text-white leading-tight">{displayName}</p>
               <p className="text-[11px] font-mono text-white/40 mt-0.5">
-                {slugify(displayName)}.menuos.app
+                /menu/{currentSlug}/&lt;table&gt;
               </p>
             </div>
           </div>
@@ -81,6 +125,54 @@ export default function SettingsPage() {
                 {t("st_opsValue", { tables: tables.length, workers: workers.length })}
               </p>
             </div>
+          </div>
+
+          {/* Menu address — the slug the guest links and printed QR codes use */}
+          <div className="mt-5 rounded-lg border border-white/10 bg-[#111111] p-4">
+            <div className="flex items-center gap-2">
+              <Link2 className="w-3.5 h-3.5 text-white/50" />
+              <p className="text-[9px] font-mono uppercase tracking-widest text-white/40">
+                {t("st_slug")}
+              </p>
+            </div>
+
+            {slugEditable ? (
+              <>
+                <div className="mt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <Input
+                    value={slugValue}
+                    onChange={(e) => setSlugDraft(e.target.value)}
+                    spellCheck={false}
+                    autoComplete="off"
+                    aria-label={t("st_slug")}
+                    className="font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={savingSlug || slugify(slugValue) === currentSlug}
+                    onClick={() => void commitSlug()}
+                    className="shrink-0"
+                  >
+                    {savingSlug ? t("save_saving") : t("st_slugSave")}
+                  </Button>
+                </div>
+                <p className="mt-2 text-[11px] text-white/40 leading-relaxed">
+                  {t("st_slugDesc")}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 flex items-center gap-1.5 text-xs font-mono text-white/90 break-all">
+                  <Lock className="w-3 h-3 shrink-0 text-white/40" />
+                  {currentSlug}
+                </p>
+                <p className="mt-2 text-[11px] text-white/40 leading-relaxed">
+                  {hydrationState === "failed" ? t("st_slugBlocked") : t("st_slugLocked")}
+                </p>
+              </>
+            )}
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-2">

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { useOrders } from "@/lib/use-orders";
+import { orderSaveError, useOrders } from "@/lib/use-orders";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { OrderStatus } from "@/lib/constants";
@@ -20,9 +20,10 @@ const FILTERS: { key: Filter; labelKey: string }[] = [
 ];
 
 export default function OrdersPage() {
-  const { orders, acceptOrder, markOrderPaid, live } = useOrders();
+  const { orders, acceptOrder, markOrderPaid, live, stale, revert } = useOrders();
   const { t } = useI18n();
   const [filter, setFilter] = useState<Filter>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const sorted = [...orders].sort((a, b) => b.number - a.number);
   const filtered =
@@ -35,14 +36,39 @@ export default function OrdersPage() {
     paid: orders.filter((o) => o.status === "paid").length,
   };
 
-  const handleAccept = (id: string) => {
-    acceptOrder(id);
-    toast.success(t("ord_acceptToast"), { description: t("ord_acceptToastDesc") });
+  const handleAccept = async (id: string) => {
+    if (busyId === id) return;
+    setBusyId(id);
+    try {
+      const res = await acceptOrder(id);
+      // Demo mode has no server to answer, so only a cloud mutation can fail.
+      if (live && (!res || !res.ok)) {
+        revert();
+        const detail = await orderSaveError(res);
+        toast.error(detail ? t("ord_saveFailed", { msg: detail }) : t("ord_offline"));
+        return;
+      }
+      toast.success(t("ord_acceptToast"), { description: t("ord_acceptToastDesc") });
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const handlePaid = (id: string) => {
-    markOrderPaid(id);
-    toast.success(t("ord_paidToast"), { description: t("ord_paidToastDesc") });
+  const handlePaid = async (id: string) => {
+    if (busyId === id) return;
+    setBusyId(id);
+    try {
+      const res = await markOrderPaid(id);
+      if (live && (!res || !res.ok)) {
+        revert();
+        const detail = await orderSaveError(res);
+        toast.error(detail ? t("ord_saveFailed", { msg: detail }) : t("ord_offline"));
+        return;
+      }
+      toast.success(t("ord_paidToast"), { description: t("ord_paidToastDesc") });
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (
@@ -52,6 +78,12 @@ export default function OrdersPage() {
         title={t("ord_title")}
         description={t("ord_desc")}
       />
+
+      {stale && (
+        <p className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-300 leading-relaxed">
+          {t("off_staleData")}
+        </p>
+      )}
 
       <div className="flex items-center gap-1.5 flex-wrap mb-6">
         {FILTERS.map((f) => (
@@ -67,12 +99,12 @@ export default function OrdersPage() {
             )}
           >
             {t(f.labelKey)}
-            <span className={cn("ml-1.5 font-mono", filter === f.key ? "text-black/60" : "text-white/40")}>
+            <span className={cn("ms-1.5 font-mono", filter === f.key ? "text-black/60" : "text-white/40")}>
               {counts[f.key]}
             </span>
           </button>
         ))}
-        <OrderStatusPill className="ml-auto" />
+        <OrderStatusPill className="ms-auto" />
       </div>
 
       {filtered.length === 0 ? (
@@ -90,6 +122,7 @@ export default function OrdersPage() {
               order={order}
               onAccept={handleAccept}
               onPaid={handlePaid}
+              disabled={busyId === order.id}
             />
           ))}
         </div>

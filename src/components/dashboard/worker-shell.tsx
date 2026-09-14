@@ -9,16 +9,16 @@ import { useI18n } from "@/lib/i18n";
 import { RestaurantLogo } from "@/components/restaurant-logo";
 
 export function WorkerShell({ children }: { children: React.ReactNode }) {
-  const { restaurantName, logo, brandColor, orders, workerSession, setWorkerSession } = useOnboarding();
+  const { restaurantName, orders, workerSession, setWorkerSession } = useOnboarding();
   const { t, plural } = useI18n();
   const router = useRouter();
-  const displayName = restaurantName || "Velvet & Stone Coffee";
+  const displayName = restaurantName || t("ob_yourCafe");
   const pendingCount = orders.filter((o) => o.status === "pending").length;
 
-  // Server-validated gate: restores the worker identity from the HttpOnly
-  // session cookie when local storage is empty, and bounces devices with no
-  // valid session (revoked/expired/forged) back home. Offline demo mode
-  // (503 NO_BACKEND) is left alone so local invites keep working.
+  // Server-validated gate. The identity is always re-read from the server
+  // (authoritative name/role); localStorage is a display cache for the offline
+  // board and is cleared when the server refuses the session. A 503 means this
+  // deployment has no backend at all, which is the only local/offline path.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -30,18 +30,21 @@ export function WorkerShell({ children }: { children: React.ReactNode }) {
             cloud?: boolean;
             worker?: { id: string; name: string; role: "Cashier" | "Manager" };
           };
-          if (json.cloud && json.worker && !workerSession) {
+          if (json.cloud && json.worker) {
             setWorkerSession({
               id: json.worker.id,
               name: json.worker.name,
               role: json.worker.role,
             });
           }
-        } else if (res.status === 401 && !workerSession) {
-          router.replace("/");
+          return;
         }
+        if (res.status === 503) return; // no backend — offline demo flow
+        // Expired, revoked or forged: a cached identity never authorizes.
+        setWorkerSession(null);
+        router.replace("/");
       } catch {
-        /* offline demo — keep local flow */
+        /* network failure — keep the last known session for the offline board */
       }
     })();
     return () => {
@@ -68,11 +71,13 @@ export function WorkerShell({ children }: { children: React.ReactNode }) {
 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           {plural(pendingCount, "w_orders_one", "w_orders_other")}
           </span>
-          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 pl-1 pr-3 py-1">
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 ps-1 pe-3 py-1">
             <div className="flex items-center justify-center rounded-full bg-[#1A1A1A] border border-white/10 h-6 w-6">
               <MessageSquareText className="w-3 h-3 text-white/70" />
             </div>
-            <span className="text-[11px] font-mono uppercase tracking-wider text-white/70">{t("wk_cashier")}</span>
+            <span className="text-[11px] font-mono uppercase tracking-wider text-white/70">
+              {t(workerSession?.role === "Manager" ? "wk_manager" : "wk_cashier")}
+            </span>
           </div>
         </div>
       </header>

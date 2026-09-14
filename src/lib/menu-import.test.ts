@@ -4,9 +4,13 @@ import {
   normalizeKey,
   sanitizePrice,
   isOcrArtifact,
+  isVenueChrome,
+  isVenueChromeLine,
   sanitizeImport,
   buildMenuImport,
   mergeMenuImport,
+  planMenuImport,
+  previewMenuImport,
   reconcileImports,
   UNCATEGORIZED,
   type MenuImportResult,
@@ -50,6 +54,26 @@ describe("sanitizePrice", () => {
   it("undefined → 0", () => expect(sanitizePrice(undefined)).toBe(0));
   it("Infinity → 0", () => expect(sanitizePrice(Number.POSITIVE_INFINITY)).toBe(0));
   it("EUR symbol '4.500 €' → 4.5", () => expect(sanitizePrice("4.500 €")).toBe(4.5));
+  // OCR-03 / OCR-14: prefix symbols and Arabic-Indic digits were read as 0 with
+  // the digits left inside the product name.
+  it("prefix '$' → 12.5", () => expect(sanitizePrice("$12.50")).toBe(12.5));
+  it("prefix 'US$' → 12", () => expect(sanitizePrice("US$12")).toBe(12));
+  it("prefix '€' → 12, consistently with '$'", () => expect(sanitizePrice("€12")).toBe(12));
+  it("Arabic-Indic '١٢٫٥' → 12.5", () => expect(sanitizePrice("١٢٫٥")).toBe(12.5));
+  it("Arabic-Indic thousands '١٦٬٥٠٠' → 16.5", () =>
+    expect(sanitizePrice("١٦٬٥٠٠")).toBe(16.5));
+  // The parser reads "1 200" as 1.2 (TND millime convention); the string path
+  // must agree, or the same printed price depends on which stage saw it (OCR-02).
+  it("space-separated '1 200' → 1.2 (agrees with the parser)", () =>
+    expect(sanitizePrice("1 200")).toBe(1.2));
+  it("non-breaking space '1\u00A0200' → 1.2", () => expect(sanitizePrice("1\u00A0200")).toBe(1.2));
+  // No honest TND conversion exists for these: a clean 0 (rendered "—") beats a
+  // plausible-but-wrong price on a live menu.
+  it("unconvertible currency '£12' → 0", () => expect(sanitizePrice("£12")).toBe(0));
+  it("unconvertible currency '12 GBP' → 0", () => expect(sanitizePrice("12 GBP")).toBe(0));
+  it("ambiguous '1,200.50' → 0", () => expect(sanitizePrice("1,200.50")).toBe(0));
+  it("'12.5.6' → 0", () => expect(sanitizePrice("12.5.6")).toBe(0));
+  it("above the cap clamps to 9999", () => expect(sanitizePrice("9999999")).toBe(9999));
 });
 
 // ── isOcrArtifact ─────────────────────────────────────────────────
@@ -71,6 +95,58 @@ describe("isOcrArtifact", () => {
     expect(isOcrArtifact("A-1 Special")).toBe(false));
   it("non-Latin item is NOT an artifact", () =>
     expect(isOcrArtifact("مسخن بالحليب")).toBe(false));
+});
+
+// ── isVenueChrome / isVenueChromeLine (captured scan rows) ──────────
+//
+// Every rejected string below was imported as a PRODUCT by the live run
+// (`/tmp/scan1..6.json`): the first four verbatim from the scan results, the
+// rest are the same shapes the contact regexes already had to survive.
+
+describe("venue chrome", () => {
+  const CHROME_ROWS = [
+    "12 Rue de Marseille · Tunis · Tél.", // scan1/2/4, imported at 9999 DT
+    "Prix en dinars · Service compris", // scan1/2/4, imported at 0 DT
+    "نهج مرسيليا - تونس - الهاتف", // scan3/6, imported at 9999 DT
+    "الأسعار بالدينار - الخدمة مشمولة", // scan3/6, imported at 0 DT
+    "+216 71 245 890",
+    "www.cafe-jasmins.tn",
+    "contact@cafe-jasmins.tn",
+    "12 Avenue Habib Bourguiba",
+  ];
+
+  it("rejects the captured address, footer, phone, URL and e-mail rows", () => {
+    for (const row of CHROME_ROWS) {
+      expect(isVenueChrome(row)).toBe(true);
+      expect(isOcrArtifact(row)).toBe(true);
+    }
+  });
+
+  it("keeps real dishes, whatever their name looks like", () => {
+    for (const dish of [
+      "Espresso",
+      "Café au lait",
+      "Brik à l'Œuf",
+      "Homard grillé",
+      "مسخن بالحليب",
+      "قهوة عربية",
+    ]) {
+      expect(isVenueChrome(dish)).toBe(false);
+      expect(isOcrArtifact(dish)).toBe(false);
+    }
+  });
+
+  it("treats a priced menu row as a row, never as a phone number", () => {
+    // The name-level test cannot be reused on a whole line: a price is a digit
+    // run and a dish must survive it.
+    expect(isVenueChromeLine("| Couscous royal | 12.500 |")).toBe(false);
+    expect(isVenueChromeLine("Assiette tunisienne 6 500")).toBe(false);
+    expect(isVenueChromeLine("|  Espresso | 1.200  |")).toBe(false);
+    expect(isVenueChromeLine("12 Rue de Marseille · Tunis · Tél. 71 245 890")).toBe(true);
+    expect(isVenueChromeLine("71 245 890")).toBe(true);
+    expect(isVenueChromeLine("Prix en dinars · Service compris")).toBe(true);
+    expect(isVenueChromeLine("الأسعار بالدينار - الخدمة مشمولة")).toBe(true);
+  });
 });
 
 // ── sanitizeImport ────────────────────────────────────────────────
@@ -349,6 +425,81 @@ describe("mergeMenuImport", () => {
     expect(m2.categories.length).toBe(2);
     expect(m2.products.length).toBe(2);
   });
+
+  // OCR-09: the hand-typed row wins, but the skip used to be SILENT — the
+  // dialog closed as if everything had imported. `planMenuImport` reports it so
+  // the review step can show which rows were kept and what the scan proposed.
+  it("reports a row it kept instead of the scanned one", () => {
+    _id = 0;
+    const state = {
+      categories: [makeCat("Boissons")],
+      products: [
+        { ...makeProd("old-Boissons", "Espresso"), description: "mine", price: 9 },
+      ],
+    };
+    const result = buildMenuImport(
+      { categories: [{ name: "Boissons", items: [{ name: "espresso", description: "", price: 3 }] }] },
+      { files: 1, pages: 0, source: "ai", model: "m" },
+    );
+    const plan = planMenuImport(state, result, uid);
+
+    expect(plan.merged.products).toHaveLength(1);
+    expect(plan.merged.products[0].price).toBe(9);
+    expect(plan.merged.products[0].description).toBe("mine");
+    expect(plan.report).toEqual({
+      added: 0,
+      keptExisting: 1,
+      kept: [
+        { name: "espresso", categoryName: "Boissons", existingPrice: 9, scannedPrice: 3 },
+      ],
+    });
+  });
+
+  it("does not report a row it actually added", () => {
+    _id = 0;
+    const result = buildMenuImport(
+      { categories: [{ name: "Boissons", items: [{ name: "Thé", description: "", price: 2 }] }] },
+      { files: 1, pages: 0, source: "ai", model: "m" },
+    );
+    const plan = planMenuImport({ categories: [], products: [] }, result, uid);
+    expect(plan.report).toEqual({ added: 1, keptExisting: 0, kept: [] });
+  });
+
+  it("does not report a duplicate INSIDE one scan result as kept", () => {
+    _id = 0;
+    const result = buildMenuImport(
+      {
+        categories: [
+          {
+            name: "Boissons",
+            items: [
+              { name: "Thé", description: "", price: 2 },
+              { name: "thé", description: "", price: 3 },
+            ],
+          },
+        ],
+      },
+      { files: 1, pages: 0, source: "ai", model: "m" },
+    );
+    const plan = planMenuImport({ categories: [], products: [] }, result, uid);
+    expect(plan.merged.products).toHaveLength(1);
+    expect(plan.report).toEqual({ added: 1, keptExisting: 0, kept: [] });
+  });
+
+  it("previewMenuImport reports the same outcome without touching state", () => {
+    const state = {
+      categories: [makeCat("Boissons")],
+      products: [{ ...makeProd("old-Boissons", "Espresso"), price: 9 }],
+    };
+    const result = buildMenuImport(
+      { categories: [{ name: "Boissons", items: [{ name: "Espresso", description: "", price: 3 }] }] },
+      { files: 1, pages: 0, source: "ai", model: "m" },
+    );
+    const before = JSON.stringify(state);
+    const report = previewMenuImport(state, result);
+    expect(report.keptExisting).toBe(1);
+    expect(JSON.stringify(state)).toBe(before);
+  });
 });
 
 // ── reconcileImports ───────────────────────────────────────────────
@@ -589,6 +740,41 @@ describe("reconcileImports", () => {
     expect(starter?.price).toBe(3);
     expect(mains?.price).toBe(6);
     expect(mains?.description).toBe("Large");
+  });
+
+  // OCR-01: the documented invariant `final >= max(ai, parser)` was FALSE for
+  // this executed shape. The parser printed "Salade" under two sections and the
+  // AI saw it once; the disambiguated slot overwrote the parser product already
+  // stored under the bare slot, losing the Mains listing (and orphaning the
+  // category, which sanitizeImport then dropped).
+  it("keeps a parser dish listed in two sections when the AI saw only one", () => {
+    const ai = mkResult([["Starters", [["Salade", 3, "Small"]]]]);
+    const parser = mkResult(
+      [
+        ["Starters", [["Salade", 3]]],
+        ["Mains", [["Salade", 6]]],
+      ],
+      "fallback",
+    );
+    const r = reconcileImports(ai, parser);
+    expect(r.products.length).toBeGreaterThanOrEqual(
+      Math.max(ai.products.length, parser.products.length),
+    );
+    expect(r.products.length).toBe(2);
+    expect(r.products.map((p) => p.categoryName).sort()).toEqual(["Mains", "Starters"]);
+    expect(r.categories.map((c) => c.name).sort()).toEqual(["Mains", "Starters"]);
+    const mains = r.products.find((p) => p.categoryName === "Mains");
+    expect(mains?.price).toBe(6);
+  });
+
+  it("never shrinks below the richer input", () => {
+    const parser = parser8();
+    parser.products.push({ name: "Expresso", description: "", price: 1, categoryName: "Brunch" });
+    const ai = ai8();
+    const r = reconcileImports(ai, parser);
+    expect(r.products.length).toBeGreaterThanOrEqual(
+      Math.max(ai.products.length, parser.products.length),
+    );
   });
 
   it("stats source reflects the AI extraction when AI contributed dishes", () => {

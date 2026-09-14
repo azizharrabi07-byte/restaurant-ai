@@ -80,9 +80,9 @@ export function StepCategories({ headingEyebrow }: { headingEyebrow?: string }) 
   };
 
   return (
-    <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="max-w-2xl mx-auto text-start animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
-        eyebrow={headingEyebrow ?? "Step 03 · Categories"}
+        eyebrow={headingEyebrow ?? t("ob_eyebrow3")}
         title={t("ca_title")}
         description={t("ca_desc")}
       >

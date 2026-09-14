@@ -4,19 +4,23 @@
 # The database / auth / storage comes from Supabase. Use either:
 #   A) Local CLI  : `supabase start`   -> http://localhost:54321
 #   B) Hosted     : your supabase.com project
-# Point the app at it with the env vars in .env.local.
 #
-# Start everything:
-#   cp .env.example .env.local        # then fill in the values
-#   docker compose up --build
+# Prerequisites, in order:
+#   1. cp .env.example .env.local
+#   2. Fill in NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and
+#      MISTRAL_API_KEY (see README for where to get them).
+#   3. docker compose up --build
+#
+# `.env.local` is OPTIONAL for Compose: the stack boots without it and
+# http://localhost:3000/api/health reports the app as alive but with
+# "backend": false until the Supabase values are filled in.
 #
 # Services:
 #   web   -> the Next.js app at  http://localhost:3000
-#   n8n   -> workflow automation at http://localhost:5678 (optional)
 #
-# NOTE: containers talk to each other via the composer service name,
-# e.g. "n8n:5678". The browser reaches the containers via the ports
-# below. Do not use "localhost" from inside a container.
+# Containers talk to each other via the compose service name, e.g. "web:3000".
+# The browser reaches the containers via the ports below. Do not use
+# "localhost" from inside a container.
 # ------------------------------------------------------------------
 
 name: restaurant-ai
@@ -31,40 +35,25 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    env_file:
-      - .env.local
+    # Long form with `required: false`: Compose only aborts a project when an
+    # env_file is REQUIRED and missing, so a newcomer can bring the stack up
+    # before creating .env.local.
+    env_file: [{ path: .env.local, required: false }]
     environment:
       # Inside Docker, "localhost" is the container itself.
       # Override defaults that must point at the host machine if needed.
       NODE_ENV: production
-    depends_on:
-      n8n:
-        condition: service_started
-        required: false
     healthcheck:
+      # Liveness only: /api/health takes no env vars and never touches the DB.
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
 
-  n8n:
-    image: n8nio/n8n:1.49.2
-    container_name: restaurant-ai-n8n
-    restart: unless-stopped
-    ports:
-      - "5678:5678"
-    environment:
-      N8N_HOST: localhost
-      N8N_PROTOCOL: http
-      N8N_PORT: 5678
-      N8N_ENCRYPTION_KEY: "change-me-dev-only"
-      EXECUTIONS_DATA_PRUNE: "true"
-      EXECUTIONS_DATA_MAX_AGE: "168"
-    volumes:
-      - n8n_data:/home/node/.n8n
-      - ./n8n:/home/node/n8n-workflows:ro
-
-volumes:
-  n8n_data:
-    driver: local
+# NOTE: this app has NO n8n / webhook integration — zero lines of src/ reference
+# it, and the old `./n8n` bind mount did not exist, so Compose silently created
+# an empty junk directory next to the repo. The n8n service, its volume and its
+# depends_on entry were therefore removed.
+# If a workflow engine is ever needed, add it as a SEPARATE compose file (e.g.
+# docker-compose.workflows.yml) instead of growing this one.

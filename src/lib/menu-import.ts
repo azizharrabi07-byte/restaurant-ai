@@ -72,22 +72,106 @@ export function normalizeKey(raw: unknown): string {
 const MAX_PRICE = 9999;
 
 /**
+ * A line that is nothing but a price ("4.500 DT", "$12.50"), with the whole
+ * token — currency markers included — as capture group 1. Shared with the OCR
+ * quality gate so "this document carries prices" means the same thing in both
+ * stages.
+ */
+export const PRICE_ONLY_LINE_RE = new RegExp(
+  String.raw`^\s*((?:US\$|\$|€|£|¥)?\s*(?:\d[\d\s]*[.,]\d+|\d[\d\s]*)\s*(?:DT|TND|TD|EUR|USD|GBP|CHF|د\.?ت|ت|€|\$|£|E)?)\s*$`,
+  "i",
+);
+
+/**
+ * A "name + price" line: group 1 is the name, group 2 the whole price token.
+ *
+ * The name is required to END on a non-digit, and the amount may span internal
+ * whitespace. Together that stops `Couscous 1 200` from being split into a name
+ * "Couscous 1" plus an invented 200 DT price: the amount swallows the spaced
+ * group instead, and the printed name keeps every character the printer put in
+ * it (OCR-02).
+ */
+export const NAME_PRICE_LINE_RE = new RegExp(
+  String.raw`^(.+?[^\d\s])\s+((?:US\$|\$|€|£|¥)?\s*(?:\d[\d\s]*[.,]\d+|\d[\d\s]*)\s*(?:DT|TND|TD|EUR|USD|GBP|CHF|د\.?ت|ت|€|\$|£|E)?)\s*$`,
+  "i",
+);
+
+/**
+ * Normalize the digit forms and separators Arabic/French menus and OCR actually
+ * produce, so every stage downstream only has to handle ASCII:
+ *   ٠-٩ (U+0660…) and ۰-۹ (U+06F0…) → 0-9,  ٫ (U+066B) → ".",  ٬ (U+066C) → ","
+ * Non-breaking spaces become plain spaces, because "4\u00A0500" — what a PDF
+ * text layer or an OCR pass emits — must take the same branch as "4 500".
+ */
+export function normalizeOcrDigits(raw: string): string {
+  return raw
+    .replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => {
+      const code = d.charCodeAt(0);
+      return String.fromCharCode(code - (code >= 0x06f0 ? 0x06f0 : 0x0660) + 0x30);
+    })
+    .replace(/\u066B/g, ".")
+    .replace(/\u066C/g, ",")
+    .replace(/[\u00A0\u2007\u202F]/g, " ");
+}
+
+/** Currency tokens lifted out of a printed price before the amount is read. */
+const CURRENCY_TOKEN_RE = /(?:US\$|\$|€|د\.?ت|ت)|\b(?:DT|TND|TD|EUR|USD|E)\b/gi;
+
+/**
+ * Currencies this module has no honest TND conversion for. Reading the printed
+ * number as dinars would put a *plausible but wrong* price on a live menu — the
+ * one outcome this import path must never produce — so such a row imports at 0,
+ * which the review UI renders as "—" and the owner fixes by hand.
+ */
+const UNCONVERTIBLE_CURRENCY_RE = /[£¥₺]|\b(?:GBP|CHF|CAD|AED|SAR|MAD|DZD|LYD|JOD|KWD|QAR)\b/i;
+
+/**
  * Coerce a raw OCR value into a real price number.
- * - "4.500 DT" → 4.5, "16,500 DT" → 16.5, "4,500 DT" → 4.5 (Tunisian Dinar)
+ * - "4.500 DT" → 4.5, "16,500 DT" → 16.5, "12,5" → 12.5, "12.5" → 12.5,
+ *   "12 DT" → 12, "$12.50" → 12.5, "€12" → 12, "١٢٫٥" → 12.5
+ * - "1 200" → 1.2: TND is printed with three millime decimals, so a spaced
+ *   trailing group is the FRACTION, not a thousands separator (the same rule
+ *   that reads "1.200" as 1.2). Reading 200 there is the phantom price OCR-02
+ *   removed.
  * - NaN / Infinity / undefined / null / negative / unparseable → 0
  *   (0 is this app's established "no price / off-card" value, so an
  *   unreadable price never poisons the onboarding state with NaN).
+ * - a currency with no honest TND conversion (£, ¥, GBP…) → 0.
+ *
+ * "$"/"€" are read at FACE VALUE — the printed number is taken as dinars, which
+ * is the convention the rest of this pipeline already relied on for "6.5€" and
+ * "US$12". The annotation prompt asks the AI stage for an approximate
+ * conversion; a deterministic parser must not invent one.
+ *
+ * This is the ONE price routine: menu-scan.ts's OCR parser calls it too, so the
+ * same printed string can never become two different prices depending on which
+ * stage happened to see it first (OCR-02, OCR-03, OCR-14).
  */
 export function sanitizePrice(raw: unknown): number {
   if (typeof raw === "number") return clampPrice(raw);
   if (typeof raw !== "string") return 0;
-  let s = raw
-    .replace(/\s*(?:DT|TND|TD|EUR|USD|US\$|€|د\.?ت|ت)\s*/gi, "")
-    .replace(/\s+/g, "");
+
+  let s = normalizeOcrDigits(raw);
+  if (UNCONVERTIBLE_CURRENCY_RE.test(s)) return 0;
+  // Drop currency words/symbols and every other non-numeric character, so
+  // "$12.50" / "US$12" / "12 DT" / "3 E" all arrive below as one number.
+  s = s
+    .replace(CURRENCY_TOKEN_RE, "")
+    .replace(/[^\d.,\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!s) return 0;
-  if (s.includes(",") && !s.includes(".")) s = s.replace(",", ".");
-  const n = Number(s);
-  return clampPrice(n);
+
+  const spaced = s.match(/^(\d{1,3}) (\d{1,3})$/);
+  if (spaced) s = `${spaced[1]}.${spaced[2]}`;
+  s = s.replace(/\s/g, "");
+
+  // Both separators left ("1,200.50"): which one is the decimal point cannot be
+  // decided here, and a guess would be a plausible-but-wrong price.
+  if (s.includes(",") && s.includes(".")) return 0;
+  if (s.includes(",")) s = s.replace(",", ".");
+  s = s.replace(/^[.,]+|[.,]+$/g, "");
+  return s ? clampPrice(Number(s)) : 0;
 }
 
 function clampPrice(n: number): number {
@@ -103,7 +187,66 @@ const TBL_TOKEN_RE = /\b(?:tbl|table)[-_. ]?\d+(?:\.md)?\b/i;
 const OCR_FILE_RE = /_ocr[_-]|ocr[-_ ]?ingest/i;
 const PAGE_REF_RE = /^\s*\b(?:page|p\.?|page\s+\d+|seite)\s*[0-9ivx]+\b/i;
 const PRICE_ONLY_RE = /^\d+(?:[,.]\d+)*\s*(?:dt|tnd|td|€|usd|د\.?ت)?\s*$/i;
-const CONTACT_RE = /(\+?\d[\d\s().-]{6,}|\b[\w.+-]+@[\w.-]+\.\w{2,}\b|\bhttps?:\/\/\S+|(?:^|\s)www\.\S+)/i;
+const CONTACT_RE = /(\+?\d[\d\s().-]{6,}|[\w.+-]+@[\w.-]+|\bhttps?:\/\/\S+|(?:^|\s)www\.\S+)/i;
+
+/** A line that is nothing but a phone number: "71 245 890", "+216 71 245 890". */
+const PHONE_ONLY_RE = /^\+?\d[\d\s().-]{6,}$/;
+
+/**
+ * Address/contact WORDS in Latin and Arabic script, matched as whole tokens.
+ *
+ * Every printed menu carries the venue's own header and footer, and OCR reads
+ * them as ordinary text lines. On a live run of six photographs against the
+ * real provider, EVERY scan imported that furniture as products: the address
+ * line "12 Rue de Marseille · Tunis · Tél." came back at 9999 DT (the phone
+ * digits "71 245 890" assembled into one number and clamped to the price
+ * ceiling) and the footer "Prix en dinars · Service compris" at 0 DT. The
+ * Arabic/French card produced the same two rows in Arabic:
+ * "نهج مرسيليا - تونس - الهاتف" and "الأسعار بالدينار - الخدمة مشمولة".
+ *
+ * Anchoring each word on separators (start/space/·/punctuation) keeps a dish
+ * safe: only a whole token counts, so a keyword inside a longer word
+ * ("Routeur", "Telyn") cannot match.
+ */
+const VENUE_CHROME_WORD_RE =
+  /(?:^|[\s·|,;:./\\-])(?:rue|avenue|av|boulevard|bd|route|impasse|chemin|place|tél|tel|téléphone|telephone|phone|fax|mobile|gsm|adresse|address|horaires?|hours|ouvert|www|نهج|شارع|عنوان|هاتف|الهاتف|تلفون)(?=$|[\d\s·|,;:./\\-])/i;
+
+/** The card's own footer, printed under the last price. */
+const FOOTER_RE =
+  /service\s+(?:compris|inclus)|prix\s+en\s+(?:dinars?|dt|tnd)|prix\s+(?:net|ttc)|الأسعار\s+بالدينار|الخدمة\s+مشمولة|خدمة\s+مشمولة/i;
+
+/**
+ * Is this NAME the venue's furniture rather than a dish or a section?
+ *
+ * This is the name-level test: the name is expected to have had its price
+ * stripped already (as `parseOcrMarkdown` and the AI annotation both do), so a
+ * phone-shaped digit run inside it is contact noise.
+ *
+ * Deliberately NOT a price test: a 9999 DT dish is legal (that is
+ * `sanitizePrice`'s ceiling) and must still import. Rejection is on the LINE
+ * being address/contact/footer text, never on how big its number is.
+ */
+export function isVenueChrome(raw: unknown): boolean {
+  const name = normalizeName(raw);
+  if (!name) return true;
+  return CONTACT_RE.test(name) || VENUE_CHROME_WORD_RE.test(name) || FOOTER_RE.test(name);
+}
+
+/**
+ * The same test for a WHOLE line as OCR printed it, price included.
+ *
+ * `CONTACT_RE` cannot be used here: a perfectly good menu row such as
+ * "| Couscous | 12.500 |" contains a digit run of 7+ characters and would be
+ * read as a phone number. So the line-level test only accepts the address and
+ * footer WORDS, plus a line that is nothing but a phone number — which must be
+ * rejected before the parser can hold it as an orphan price for the next dish.
+ */
+export function isVenueChromeLine(raw: unknown): boolean {
+  const line = normalizeName(raw);
+  if (!line) return true;
+  if (VENUE_CHROME_WORD_RE.test(line) || FOOTER_RE.test(line)) return true;
+  return PHONE_ONLY_RE.test(line);
+}
 
 function hasLettersOrDigits(s: string): boolean {
   return /[\p{L}\p{N}]/u.test(s);
@@ -142,7 +285,7 @@ export function isOcrArtifact(raw: unknown): boolean {
   if (OCR_FILE_RE.test(name)) return true;
   if (PAGE_REF_RE.test(name)) return true;
   if (PRICE_ONLY_RE.test(name)) return true;
-  if (CONTACT_RE.test(name)) return true;
+  if (isVenueChrome(name)) return true;
   return false;
 }
 
@@ -290,22 +433,52 @@ export interface MenuStateSlice {
   products: ProductRow[];
 }
 
+/** One scanned row the merge kept as the product the owner already had. */
+export interface ImportCollision {
+  name: string;
+  categoryName: string;
+  /** price already in the menu (the merge keeps it) */
+  existingPrice: number;
+  /** price the scan read, discarded in favour of the existing row */
+  scannedPrice: number;
+}
+
+/** What a merge did (or would do) — the review step surfaces this. */
+export interface MenuImportReport {
+  /** rows added to the menu */
+  added: number;
+  /** rows kept as-is because their category already had that product */
+  keptExisting: number;
+  /** the same information per row, for the review UI */
+  kept: ImportCollision[];
+}
+
+export interface MenuImportPlan {
+  merged: MenuStateSlice;
+  report: MenuImportReport;
+}
+
 /**
- * Merge an entire MenuImportResult into app state.
+ * Merge an entire MenuImportResult into app state and report what happened.
  *
  * 1. Existing categories are found by normalized name and reused.
  * 2. Unknown categories are created.
  * 3. Products resolve their categoryName through the (reused/created) category.
- * 4. Products are deduplicated by normalized name within their category.
+ * 4. Products are deduplicated by normalized name within their category. A row
+ *    that collides with a product already in the menu keeps the EXISTING row
+ *    (the owner's hand-typed price/description always wins) — and the collision
+ *    is reported, because dropping it silently left an owner who re-scanned
+ *    after editing a price with half-applied state and a success signal
+ *    (OCR-09).
  *
  * Deterministic and step-independent: launching from Categories or Products
  * produces identical state.
  */
-export function mergeMenuImport(
+export function planMenuImport(
   state: MenuStateSlice,
   result: MenuImportResult,
   uid: () => string,
-): MenuStateSlice {
+): MenuImportPlan {
   const categories = [...state.categories];
   const products = [...state.products];
   const byKey = new Map<string, CategoryRow>();
@@ -330,16 +503,35 @@ export function mergeMenuImport(
     ensureCategory(c.name);
   }
 
+  const report: MenuImportReport = { added: 0, keptExisting: 0, kept: [] };
+  // (categoryId, nameKey) pairs this result itself already inserted: a second
+  // identical row inside one scan result is a plain duplicate, not a collision
+  // with what the owner had.
+  const inserted = new Set<string>();
+
   for (const p of result.products) {
     const rawCat = p.categoryName && normalizeKey(p.categoryName) ? p.categoryName : UNCATEGORIZED;
     const catKey = normalizeKey(rawCat);
     const cat = byKey.get(catKey) ?? ensureCategory(UNCATEGORIZED);
     const nameKey = normalizeKey(p.name);
     if (!nameKey) continue;
-    const duplicate = products.some(
+
+    const slot = `${cat.id}\u0000${nameKey}`;
+    const existing = products.find(
       (x) => x.categoryId === cat.id && normalizeKey(x.name) === nameKey,
     );
-    if (duplicate) continue;
+    if (existing) {
+      if (inserted.has(slot)) continue;
+      report.keptExisting++;
+      report.kept.push({
+        name: normalizeName(p.name),
+        categoryName: cat.name,
+        existingPrice: existing.price,
+        scannedPrice: sanitizePrice(p.price),
+      });
+      continue;
+    }
+    inserted.add(slot);
     products.push({
       id: uid(),
       categoryId: cat.id,
@@ -349,9 +541,34 @@ export function mergeMenuImport(
       image: null,
       isAvailable: true,
     });
+    report.added++;
   }
 
-  return { categories, products };
+  return { merged: { categories, products }, report };
+}
+
+/**
+ * Merge an entire MenuImportResult into app state (the onboarding store's entry
+ * point). Same work as `planMenuImport`, report discarded.
+ */
+export function mergeMenuImport(
+  state: MenuStateSlice,
+  result: MenuImportResult,
+  uid: () => string,
+): MenuStateSlice {
+  return planMenuImport(state, result, uid).merged;
+}
+
+/**
+ * What a merge WOULD keep as-is, computed without touching any state — the
+ * review step warns the owner about these rows before they are applied
+ * (OCR-09).
+ */
+export function previewMenuImport(
+  state: MenuStateSlice,
+  result: MenuImportResult,
+): MenuImportReport {
+  return planMenuImport(state, result, () => "preview").report;
 }
 
 // ── Reconcile AI + deterministic parser results ────────────────────
@@ -387,7 +604,12 @@ interface MergeSlot {
  *
  *   final products >= max(ai products, parser products)
  *
- * unless an entry is rejected by the final sanitize/validate pass.
+ * unless an entry is rejected by the final sanitize/validate pass. In
+ * particular a parser product is never overwritten: when the parser printed the
+ * same dish under two sections and the AI only saw it once, the second parser
+ * entry gets its own slot (and its own category) rather than replacing the
+ * first — which is what used to drop a listing and orphan its category
+ * (OCR-01).
  *
  * Deterministic conflict rules (no invented values, documented):
  * - name:       AI spelling when the dish was found by AI, else parser.
@@ -445,7 +667,13 @@ export function reconcileImports(
         }
       }
     } else if (!target && psKey.includes("\u0000") && merged.has(nkOf(psKey))) {
-      target = merged.get(nkOf(psKey))!;
+      // The parser printed this dish under a section the AI did not report.
+      // Attach to the AI's bare slot ONLY when nothing is attached yet:
+      // overwriting a slot that already holds a parser product destroyed that
+      // product and made the documented `final >= max(ai, parser)` invariant
+      // false (OCR-01).
+      const bare = merged.get(nkOf(psKey))!;
+      if (!bare.parser) target = bare;
     }
     if (target) {
       if (!target.ai) target.name = ps.name;

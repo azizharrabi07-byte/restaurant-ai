@@ -88,6 +88,7 @@ function validPayload(over: Partial<MenuSyncPayload> = {}): MenuSyncPayload {
         price: 4.5,
         imageUrl: "https://example.com/img.jpg",
         isAvailable: true,
+        position: 0,
       },
     ],
     tables: [{ id: FRESH, number: 1, token: "abc123" }],
@@ -138,5 +139,70 @@ describe("validateSyncPayload", () => {
     expect(badSlug.ok).toBe(false);
     const badColor = validateSyncPayload(validPayload({ restaurant: { ...validPayload().restaurant, primaryColor: "red" } }));
     expect(badColor.ok).toBe(false);
+  });
+
+  it("rejects duplicate product ids and non-uuid ids", () => {
+    const p = validPayload().products[0];
+    expect(validateSyncPayload({ ...validPayload(), products: [p, p] }).ok).toBe(false);
+
+    const nonUuid = {
+      ...validPayload(),
+      categories: [{ id: "not-a-uuid", name: "Coffee", position: 0 }],
+      products: [],
+    };
+    expect(validateSyncPayload(nonUuid).ok).toBe(false);
+  });
+
+  it("rejects duplicate table ids and duplicate QR tokens", () => {
+    const t = validPayload().tables[0];
+    expect(validateSyncPayload({ ...validPayload(), tables: [t, t] }).ok).toBe(false);
+
+    const sharedToken = [
+      { id: FRESH, number: 1, token: "same-token" },
+      { id: OWNED, number: 2, token: "same-token" },
+    ];
+    expect(validateSyncPayload({ ...validPayload(), tables: sharedToken }).ok).toBe(false);
+  });
+
+  it("rejects a business type outside BUSINESS_TYPES and non-6-digit colors", () => {
+    const r = validPayload().restaurant;
+    expect(
+      validateSyncPayload({ ...validPayload(), restaurant: { ...r, businessType: "spaceship" } }).ok,
+    ).toBe(false);
+    expect(
+      validateSyncPayload({ ...validPayload(), restaurant: { ...r, primaryColor: "#abc" } }).ok,
+    ).toBe(false);
+    expect(
+      validateSyncPayload({ ...validPayload(), restaurant: { ...r, primaryColor: "#11223344" } }).ok,
+    ).toBe(false);
+  });
+
+  it("rejects non-boolean isAvailable / isPublished", () => {
+    expect(
+      validateSyncPayload({
+        ...validPayload(),
+        products: [{ ...validPayload().products[0], isAvailable: "no" }],
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateSyncPayload({
+        ...validPayload(),
+        restaurant: { ...validPayload().restaurant, isPublished: "yes" },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("returns a rebuilt payload, not a cast of the raw body", () => {
+    const r = validateSyncPayload({
+      ...validPayload(),
+      categories: [{ id: FRESH, name: "Coffee" }],
+      products: [{ ...validPayload().products[0], position: "first" }],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payload.categories[0].position).toBe(0);
+      expect(r.payload.products[0].position).toBe(0);
+      expect(r.payload.products[0].isAvailable).toBe(true);
+    }
   });
 });

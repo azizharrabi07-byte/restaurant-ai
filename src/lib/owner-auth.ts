@@ -151,6 +151,39 @@ async function refreshOwnerTokens(
   }
 }
 
+/**
+ * Server-side logout: tell Supabase to invalidate the session behind this
+ * access token, which also kills its refresh token. Without this a "logged
+ * out" browser keeps a refresh token that can mint fresh access tokens for
+ * the full refresh lifetime (60 days).
+ *
+ * Best effort by design: a non-2xx (already-revoked, expired token, backend
+ * hiccup) is tolerated, because the caller still has to clear the cookie.
+ */
+export async function revokeOwnerSession(
+  accessToken: string | null,
+): Promise<void> {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  if (!accessToken || !key || !url || !supabaseAdmin) return;
+  try {
+    const res = await fetch(`${url}/auth/v1/logout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: key,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok && res.status !== 401) {
+      console.warn(`[sufra] owner logout revoke failed: HTTP ${res.status}`);
+    }
+  } catch (err) {
+    console.warn("[sufra] owner logout revoke failed:", err);
+  }
+}
+
 /** Resolve a stored cookie value into a verified session, rotating if needed. */
 export async function resolveOwnerSession(
   raw: string | null | undefined,

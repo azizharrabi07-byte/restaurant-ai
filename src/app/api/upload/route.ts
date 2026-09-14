@@ -14,6 +14,42 @@ const ALLOWED_MIME: Record<string, string> = {
   "image/webp": "webp",
 };
 
+/** Magic-byte check — the client-declared MIME type is not trustworthy. */
+function sniffImageType(
+  bytes: Uint8Array,
+): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
 async function ensureBucket(): Promise<boolean> {
   if (!supabaseAdmin) return false;
   try {
@@ -76,22 +112,29 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ cloud: false, error: "BAD_BODY", message: "file field required" }, { status: 400 });
   }
-  const ext = ALLOWED_MIME[file.type];
-  if (!ext) {
+  const declaredExt = ALLOWED_MIME[file.type];
+  if (!declaredExt) {
     return NextResponse.json({ cloud: false, error: "BAD_IMAGE", message: "Only JPEG, PNG or WebP images." }, { status: 415 });
   }
   if (file.size <= 0 || file.size > UPLOAD_MAX_BYTES) {
     return NextResponse.json({ cloud: false, error: "IMAGE_TOO_LARGE", message: "Image must be under 5 MB." }, { status: 413 });
   }
 
+  // The declared type must also match the actual bytes: an image/gif renamed to
+  // .png, or a script payload served as an image, is rejected here.
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const sniffed = sniffImageType(bytes);
+  if (!sniffed || sniffed !== file.type) {
+    return NextResponse.json({ cloud: false, error: "BAD_IMAGE", message: "Only JPEG, PNG or WebP images." }, { status: 415 });
+  }
+
   if (!(await ensureBucket())) {
     return NextResponse.json({ cloud: false, error: "STORAGE_UNAVAILABLE" }, { status: 503 });
   }
 
-  const path = `${restaurantId}/${randomUUID()}.${ext}`;
-  const bytes = Buffer.from(await file.arrayBuffer());
+  const path = `${restaurantId}/${randomUUID()}.${ALLOWED_MIME[sniffed]}`;
   const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, bytes, {
-    contentType: file.type,
+    contentType: sniffed,
     upsert: false,
   });
   if (error) {

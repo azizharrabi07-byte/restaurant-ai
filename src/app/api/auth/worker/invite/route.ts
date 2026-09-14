@@ -6,6 +6,7 @@ import {
   getOwnerSessionForRequest,
 } from "@/lib/owner-auth";
 import { INVITE_TTL_MS, newInviteToken } from "@/lib/worker-invite";
+import { checkRateLimit, retryAfterHeaders } from "@/lib/rate-limit";
 import type { WorkerRole } from "@/lib/constants";
 
 const schema = z.object({
@@ -21,6 +22,16 @@ export async function POST(req: Request) {
   if (!supabaseAdmin) {
     return NextResponse.json({ cloud: false, error: "NO_BACKEND" }, { status: 503 });
   }
+  // Minting a redeemable credential is throttled like every other limited
+  // route: an owner session must not be able to create them without bound.
+  const rate = checkRateLimit(req, "worker-invite", { limit: 20, windowMs: 60_000 });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { cloud: false, error: "RATE_LIMITED", message: `try again in ${rate.retryAfterSeconds}s` },
+      { status: 429, headers: retryAfterHeaders(rate) },
+    );
+  }
+
   const session = await getOwnerSessionForRequest(req);
   if (!session) {
     return NextResponse.json({ cloud: false, error: "UNAUTHORIZED" }, { status: 401 });

@@ -1,0 +1,131 @@
+# ============================================================================
+# Sufra / restaurant-ai — LOCAL DEVELOPMENT ONLY.
+#
+# This config drives `supabase start` (Supabase CLI) so a developer gets the
+# auth / storage / PostgREST stack on localhost. PRODUCTION USES A HOSTED
+# SUPABASE PROJECT (https://supabase.com): nothing in this file applies there,
+# and it must never be used to reason about production settings. Never put
+# secrets in this file — `supabase start` prints the local keys it generates.
+#
+# Field names below are taken from the reference config emitted by THIS CLI
+# version's own template (CLI 2.114.0, `supabase init`), not from memory.
+# Keys that could not be verified against that template are omitted on purpose:
+# an unknown key makes `supabase start` fail with an unhelpful parse error,
+# which is worse than relying on the default.
+# ============================================================================
+
+# Distinguishes projects on one host. Matches the Compose project name in
+# docker-compose.yml (`name: restaurant-ai`).
+project_id = "restaurant-ai"
+
+[api]
+enabled = true
+# The app talks to PostgREST/REST through the service role, so the defaults
+# below are all it needs (no anon client exists in this codebase).
+#
+# PORTS ARE 544xx, NOT THE USUAL 543xx. Another Supabase project on this
+# machine (`fundu`) already holds 54321-54324, and `supabase start` refuses to
+# boot when a port is taken. Shifting this project's four public ports lets
+# both stacks run at once without stopping the other one. Set them back to
+# 543xx if you are on a machine where nothing else is listening.
+port = 54421
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54422
+shadow_port = 54420
+# Must match the hosted production project's major version
+# (`SHOW server_version;` on it). 17 is the default for this CLI version.
+major_version = 17
+
+[db.migrations]
+# `supabase start` / `supabase db reset` apply every supabase/migrations/*.sql
+# in filename (byte) order: 0001_init_schema.sql, 1002_production_readiness.sql,
+# 1003_live_db_repair.sql, 1004_session_hardening.sql.
+enabled = true
+
+[db.seed]
+# There is no supabase/seed.sql in this repo; ./seed.sql is the CLI default.
+# Disabled so a `db reset` never fails on a seed file that does not exist.
+enabled = false
+
+[studio]
+enabled = true
+port = 54423
+# Studio runs in its own container and reaches the API container at this URL.
+api_url = "http://127.0.0.1"
+
+# Local mail catcher. Password recovery (`/api/auth/recover` -> `/auth/reset`)
+# needs it: instead of sending mail, GoTrue stores messages here so the flow
+# can be completed without an SMTP server.
+[local_smtp]
+enabled = true
+port = 54424
+
+[storage]
+enabled = true
+# Mirrors the upload route's own guard (UPLOAD_MAX_BYTES = 5 MB,
+# src/app/api/upload/route.ts:9) and the bucket limit written by
+# supabase/migrations/0001_init_schema.sql.
+file_size_limit = "5MiB"
+# The `menu-images` bucket itself is created by the migrations (the base schema
+# inserts the bucket row and the storage.objects read policy), so it is
+# deliberately NOT declared under [storage.buckets.*] here — two sources of
+# truth for one bucket would fight over its limits.
+
+[auth]
+enabled = true
+# The app is served by `npm run dev` on port 3000 (see README).
+site_url = "http://localhost:3000"
+# Exact post-authentication redirect targets the app uses:
+#   /auth/reset    -> redirectTo sent with resetPasswordForEmail
+#                     (src/app/api/auth/recover/route.ts:47)
+#   /auth/callback -> completes an implicit-grant link; the /auth/reset page
+#                     POSTs /api/auth/callback and the hash forwarder rewrites
+#                     stray #access_token fragments to /auth/reset
+#                     (src/components/auth-hash-forwarder.tsx:18-21)
+# Both the `localhost` and `127.0.0.1` origins are listed because the recovery
+# link's origin is derived from the incoming request when
+# NEXT_PUBLIC_APP_URL is unset (src/app/api/auth/recover/route.ts:10-14).
+additional_redirect_urls = [
+  "http://localhost:3000/auth/reset",
+  "http://localhost:3000/auth/callback",
+  "http://127.0.0.1:3000/auth/reset",
+  "http://127.0.0.1:3000/auth/callback",
+]
+# First-run owner signup is a real flow (POST /api/auth/signup), so signups must
+# stay enabled locally.
+enable_signup = true
+# The signup API rejects passwords shorter than 8 characters
+# (src/app/api/auth/signup/route.ts:8); keep GoTrue's own minimum in step so a
+# locally-created account can never be weaker than the app's rule.
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+# Local development: a developer has no inbox, so requiring confirmation would
+# lock them out of their own stack. Emails are captured by [local_smtp] above.
+enable_confirmations = false
+
+# ----------------------------------------------------------------------------
+# Unused services, turned off.
+#
+# The app uses Postgres, Auth, PostgREST and Storage — and nothing else. There
+# is no Realtime subscription anywhere in src/, no edge function in
+# supabase/functions/, and no analytics/Logflare client. Leaving them on costs
+# four containers and is how `supabase start` fails on this machine: the
+# analytics (Logflare) container comes up `unhealthy` and the CLI then aborts
+# and tears the whole stack down, even though Postgres, Auth, REST and Storage
+# were already up and the migrations had applied successfully.
+# ----------------------------------------------------------------------------
+
+[analytics]
+enabled = false
+
+[realtime]
+enabled = false
+
+[edge_runtime]
+enabled = false

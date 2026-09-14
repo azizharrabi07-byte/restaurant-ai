@@ -6,9 +6,12 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
+    "start:standalone": "node .next/standalone/server.js",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "db:push": "supabase db push"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

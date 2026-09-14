@@ -5,6 +5,11 @@ on:
     branches: ["**"]
   pull_request:
 
+# A superseded run on the same ref (new push, updated PR) is worthless — cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -21,3 +26,239 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+
+  # `verify` never opens a database connection, so it cannot see the SQL at all:
+  # supabase/migrations/*.sql could be syntactically broken, reference a column
+  # that does not exist, or silently skip a whole section and everything above
+  # would still be green. This job applies the real migration chain to a real
+  # PostgreSQL 16 and then asserts the resulting schema.
+  #
+  # STRATEGY — option (a), a shim on vanilla Postgres, and why:
+  # the migrations target a Supabase project, so they reference objects Supabase
+  # provides and vanilla Postgres does not (`auth.users`, `auth.uid()`, the
+  # `storage.buckets` / `storage.objects` tables, the `anon` / `authenticated` /
+  # `service_role` roles). Option (b) — running inside the `supabase/postgres`
+  # image instead — was rejected: that image creates the auth schema and the
+  # roles, but NOT the Storage tables. Its Dockerfile copies only
+  # `migrations/db` (init-scripts + migrations) into the image; those create the
+  # `storage` SCHEMA and GRANT on storage tables without ever creating them
+  # (supabase/postgres `migrations/db/migrations/*_grant_storage_*.sql`).
+  # `storage.buckets` / `storage.objects` are created by the Storage API
+  # container at runtime. Since migration 1002 §8 inserts into storage.buckets
+  # and creates a policy on storage.objects, a supabase/postgres-only run would
+  # fail for a reason that has nothing to do with our SQL — a misleading red CI.
+  # So the stand-ins are applied from the repo's own documented shim,
+  # `supabase/tests/_shim_storage.sql`, rather than duplicated inline here: one
+  # source of truth, also usable for a local `psql` run.
+  migrations:
+    name: Validate SQL migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # The scratch database the migrations are applied to.
+          POSTGRES_DB: sufra_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sufra_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: sufra_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the psql client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16 \
+            || sudo apt-get install -y --no-install-recommends postgresql-client
+
+      # The Supabase-hosted objects a vanilla Postgres lacks. Missing file is a
+      # hard failure with a clear message, not a silent skip — without these the
+      # migration step below would fail somewhere misleading.
+      - name: Apply the Supabase stand-ins the migrations expect
+        run: |
+          set -euo pipefail
+          shim=supabase/tests/_shim_storage.sql
+          if [ ! -f "$shim" ]; then
+            echo "::error::$shim is missing — the migration chain cannot run on plain Postgres without it"
+            exit 1
+          fi
+          psql -v ON_ERROR_STOP=1 -f "$shim"
+
+      # Globbed, not hard-coded, so a migration added tomorrow is covered too.
+      # LC_ALL=C gives byte order, which is the order the Supabase CLI applies
+      # (numeric prefixes sort correctly as strings).
+      # --single-transaction matches how Supabase runs one migration: all of it,
+      # or none of it.
+      - name: Apply every migration in order
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          shopt -s nullglob
+          files=(supabase/migrations/*.sql)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no .sql files found in supabase/migrations/"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "::group::applying $f"
+            psql -v ON_ERROR_STOP=1 --single-transaction -f "$f"
+            echo "::endgroup::"
+          done
+
+      # Behavioural smoke test: inserts a restaurant, menu, table, order, worker
+      # and invite, and exercises the uniqueness / CHECK / RLS-helper contracts
+      # the app's call sites depend on. Raises on the first failure.
+      - name: Run the schema smoke test
+        run: |
+          set -euo pipefail
+          smoke=supabase/tests/schema_smoke.sql
+          if [ ! -f "$smoke" ]; then
+            echo "::error::$smoke is missing"
+            exit 1
+          fi
+          psql -v ON_ERROR_STOP=1 -f "$smoke"
+
+      # Green above means "the app's writes work". These are the DB-level
+      # post-conditions the smoke test does not cover: defence-in-depth wiring
+      # (RLS, policies, trigger count) and the owner helper's fail-closed
+      # behaviour, all from docs/audit/01-database.md.
+      - name: Assert RLS, policies and trigger invariants
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE
+            n          integer;
+            rest       uuid;
+            unexpected text;
+            missing    text;
+          BEGIN
+            -- Every private table must have RLS enabled; the app runs on the
+            -- service role (which bypasses RLS), so a missing ENABLE ROW LEVEL
+            -- SECURITY would be invisible to every other check here.
+            SELECT count(*) INTO n
+            FROM pg_class c
+            JOIN pg_namespace ns ON ns.oid = c.relnamespace
+            WHERE ns.nspname = 'public'
+              AND c.relname IN ('restaurants', 'categories', 'products',
+                                'restaurant_tables', 'orders', 'order_items',
+                                'workers', 'worker_invites',
+                                'sufra_daily_counters')
+              AND c.relrowsecurity;
+            IF n <> 9 THEN
+              RAISE EXCEPTION 'RLS enabled on % of 9 public tables, expected 9', n;
+            END IF;
+
+            -- No `using (true)` survivors on the owner-scoped tables (DB-06).
+            SELECT count(*) INTO n
+            FROM pg_policies
+            WHERE schemaname = 'public' AND qual = 'true';
+            IF n <> 0 THEN
+              RAISE EXCEPTION '% public policy(ies) still allow everything: %',
+                n, (SELECT string_agg(policyname || ' on ' || tablename, ', ')
+                      FROM pg_policies WHERE schemaname = 'public' AND qual = 'true');
+            END IF;
+
+            -- Only the owner policies from 1002 §7 may exist on public tables,
+            -- and each must be granted to `authenticated` — not `public`. This
+            -- is an exact-set check, not a count, so a legacy permissive policy
+            -- is caught by name (DB-06).
+            SELECT string_agg(p.tablename || '/' || p.policyname || ' ' || p.roles::text, ', ')
+              INTO unexpected
+            FROM pg_policies p
+            WHERE p.schemaname = 'public'
+              AND (
+                p.policyname NOT IN (
+                  'restaurants_owner_all', 'categories_owner_all',
+                  'products_owner_all', 'restaurant_tables_owner_all',
+                  'orders_owner_all', 'order_items_owner_all',
+                  'workers_owner_all', 'worker_invites_owner_all'
+                )
+                OR p.roles::text <> '{authenticated}'
+              );
+            IF unexpected IS NOT NULL THEN
+              RAISE EXCEPTION 'unexpected public policy(ies): %', unexpected;
+            END IF;
+
+            SELECT string_agg(want, ', ') INTO missing
+            FROM unnest(ARRAY[
+                   'restaurants_owner_all', 'categories_owner_all',
+                   'products_owner_all', 'restaurant_tables_owner_all',
+                   'orders_owner_all', 'order_items_owner_all',
+                   'workers_owner_all', 'worker_invites_owner_all'
+                 ]) AS want
+            WHERE NOT EXISTS (
+              SELECT 1 FROM pg_policies p
+              WHERE p.schemaname = 'public' AND p.policyname = want
+            );
+            IF missing IS NOT NULL THEN
+              RAISE EXCEPTION 'missing owner policy(ies): %', missing;
+            END IF;
+
+            -- Exactly one trigger on public.orders: the order_day keeper.
+            -- Legacy triggers that renumber tickets are regressions (DB-17).
+            SELECT count(*) INTO n
+            FROM pg_trigger
+            WHERE tgrelid = 'public.orders'::regclass AND NOT tgisinternal;
+            IF n <> 1 THEN
+              RAISE EXCEPTION 'expected exactly 1 trigger on public.orders, found %', n;
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_trigger
+              WHERE tgrelid = 'public.orders'::regclass
+                AND tgname = 'sufra_orders_set_day' AND NOT tgisinternal
+            ) THEN
+              RAISE EXCEPTION 'the sufra_orders_set_day trigger is missing';
+            END IF;
+
+            -- order_items must carry NO application trigger (prior C2: one that
+            -- rewrote price_snapshot broke every worker manual order).
+            SELECT count(*) INTO n
+            FROM pg_trigger
+            WHERE tgrelid = 'public.order_items'::regclass AND NOT tgisinternal;
+            IF n <> 0 THEN
+              RAISE EXCEPTION 'public.order_items has % application trigger(s), expected 0', n;
+            END IF;
+
+            -- The menu-images bucket row and its public-read policy.
+            SELECT count(*) INTO n FROM storage.buckets WHERE id = 'menu-images';
+            IF n <> 1 THEN
+              RAISE EXCEPTION 'the menu-images bucket row is missing';
+            END IF;
+            SELECT count(*) INTO n
+            FROM pg_policies
+            WHERE schemaname = 'storage' AND tablename = 'objects'
+              AND policyname = 'menu_images_public_read';
+            IF n <> 1 THEN
+              RAISE EXCEPTION 'the menu_images_public_read policy is missing';
+            END IF;
+
+            -- The owner helper must fail CLOSED when there is no JWT: on a
+            -- vanilla Postgres auth.uid() is NULL, so this must be false. A
+            -- helper that returned true would hand every anon request the data.
+            -- ON CONFLICT keeps this step re-runnable against a database that
+            -- already ran it (the CI service container is fresh, a developer's
+            -- local database is not).
+            INSERT INTO public.restaurants (name, slug)
+            VALUES ('CI policy probe', 'ci-policy-probe')
+            ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id INTO rest;
+
+            IF public.sufra_is_owner(rest) IS NOT FALSE THEN
+              RAISE EXCEPTION 'sufra_is_owner() did not fail closed for a NULL auth.uid()';
+            END IF;
+
+            RAISE NOTICE 'RLS / policy / trigger invariants hold';
+          END $$;
+          SQL

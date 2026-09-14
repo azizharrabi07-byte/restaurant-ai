@@ -2,25 +2,24 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { appBaseUrl } from "@/lib/utils";
 
 const schema = z.object({
   email: z.string({ invalid_type_error: "email must be a string" }).trim().toLowerCase().email("valid email required"),
 });
 
-function appBase(req: Request): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
-  return new URL(req.url).origin;
-}
-
 /**
- * Request a password-recovery email. Always returns success (even for
- * unknown emails or mailer failures) so the endpoint cannot be used to
- * enumerate registered accounts.
+ * Request a password-recovery email.
+ *
+ * Enumeration-safe: for every parsed email — registered, unknown, or one the
+ * mailer fails to reach — the response is the same neutral `200 {cloud:true}`.
+ * The only non-200 is a backend-wide condition (no mailer configured), which
+ * cannot distinguish one account from another. Reporting it is the point: a
+ * locked-out owner must not be told a link is on its way when nothing can send.
  */
 export async function POST(req: Request) {
   if (!supabaseAdmin) {
-    return NextResponse.json({ cloud: true });
+    return NextResponse.json({ cloud: false, error: "NO_BACKEND" }, { status: 503 });
   }
 
   const rate = checkRateLimit(req, "recover", { limit: 5, windowMs: 600_000 });
@@ -44,7 +43,7 @@ export async function POST(req: Request) {
 
   try {
     await supabaseAdmin.auth.resetPasswordForEmail(parsed.data.email, {
-      redirectTo: `${appBase(req)}/auth/reset`,
+      redirectTo: `${appBaseUrl(new URL(req.url).origin)}/auth/reset`,
     });
   } catch {
     /* generic success regardless */

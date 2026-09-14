@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { createSessionAuthClient, supabaseAdmin } from "@/lib/supabase-admin";
 import { setOwnerSessionCookie } from "@/lib/owner-auth";
+import { checkRateLimit, retryAfterHeaders } from "@/lib/rate-limit";
 
 const schema = z.object({
   email: z.string({ invalid_type_error: "email must be a string" }).trim().toLowerCase().email("valid email required"),
@@ -24,6 +25,16 @@ function isPlaceholderOwner(email: string | null | undefined): boolean {
 export async function POST(req: Request) {
   if (!supabaseAdmin) {
     return NextResponse.json({ cloud: false, error: "NO_BACKEND" }, { status: 503 });
+  }
+  // Throttled before any DB work: this route both answers whether an address
+  // exists (EMAIL_TAKEN) and creates confirmed auth users through the
+  // service-role client, so it must not be free to script.
+  const rate = checkRateLimit(req, "signup", { limit: 5, windowMs: 600_000 });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { cloud: false, error: "RATE_LIMITED", message: `try again in ${rate.retryAfterSeconds}s` },
+      { status: 429, headers: retryAfterHeaders(rate) },
+    );
   }
 
   let json: unknown;
@@ -79,29 +90,60 @@ export async function POST(req: Request) {
     return NextResponse.json({ cloud: false, error: "CREATE_USER", message: "Couldn't create this account." }, { status: 500 });
   }
 
-  // Bind placeholder-owned restaurants (or an unowned restaurant) to the new owner.
+  // Bind placeholder-owned restaurants (or an unowned restaurant) to the new
+  // owner. A binding that fails leaves the account owning nothing, so report
+  // it instead of returning a success the owner cannot act on.
   const targetIds = ownedByPlaceholder.map((r) => r.id as string);
   if (targetIds.length > 0) {
     for (const id of targetIds) {
-      await supabaseAdmin.from("restaurants").update({ owner_id: created.user.id }).eq("id", id);
+      const { error: bindErr } = await supabaseAdmin
+        .from("restaurants")
+        .update({ owner_id: created.user.id })
+        .eq("id", id);
+      if (bindErr) {
+        return NextResponse.json(
+          { cloud: false, error: "PROVISION_FAILED", message: "Your account was created, but the restaurant could not be linked. Please sign in and try again." },
+          { status: 500 },
+        );
+      }
     }
   } else if (ownedByOthers.length === 0 && (restaurants?.length ?? 0) === 1) {
-    await supabaseAdmin.from("restaurants").update({ owner_id: created.user.id }).eq("owner_id", null);
+    const { data: bound, error: bindErr } = await supabaseAdmin
+      .from("restaurants")
+      .update({ owner_id: created.user.id })
+      .eq("owner_id", null)
+      .select("id");
+    if (bindErr || !bound?.length) {
+      return NextResponse.json(
+        { cloud: false, error: "PROVISION_FAILED", message: "Your account was created, but the restaurant could not be linked. Please sign in and try again." },
+        { status: 500 },
+      );
+    }
   }
 
   // Auto sign-in with the fresh account so no separate login step is needed.
-  const { data: sessionData, error: sessionErr } = await supabaseAdmin.auth.signInWithPassword({
+  // Throwaway client — see the note in src/lib/supabase-admin.ts: signing in on
+  // the shared client would re-authenticate this whole process as the new user.
+  const auth = createSessionAuthClient();
+  const { data: sessionData, error: sessionErr } = await auth!.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
   });
+
+  if (sessionErr || !sessionData?.session) {
+    // The account exists but carries no session: reporting 200 here would land
+    // the owner on /dashboard and bounce them straight back to /auth/login.
+    return NextResponse.json(
+      { cloud: false, error: "SESSION", message: "Your account was created, but signing in failed. Please sign in." },
+      { status: 500 },
+    );
+  }
 
   const res = NextResponse.json({
     cloud: true,
     user: { id: created.user.id, email: created.user.email },
   });
-  if (!sessionErr && sessionData.session) {
-    setOwnerSessionCookie(res, sessionData.session.access_token, sessionData.session.refresh_token);
-  }
+  setOwnerSessionCookie(res, sessionData.session.access_token, sessionData.session.refresh_token);
 
   return res;
 }

@@ -29,9 +29,9 @@ export function StepBusiness({ headingEyebrow }: { headingEyebrow?: string }) {
   } = useOnboarding();
 
   return (
-    <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="max-w-2xl mx-auto text-start animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
-        eyebrow={headingEyebrow ?? "Step 01 · Identity"}
+        eyebrow={headingEyebrow ?? t("ob_eyebrow1")}
         title={t("sb_title")}
         description={t("sb_desc")}
       />

@@ -1,0 +1,94 @@
+%% Sufra - AI menu scan pipeline, traced to the code, NOT to README section 6.
+%% Broken stages are styled and their annotations carry finding IDs from
+%% docs/audit/07-ocr-pipeline.md and docs/audit/04-lib-core.md.
+flowchart TB
+    subgraph ClientSide["Client - the scan dialog in the onboarding wizard"]
+        Pick["Pick files<br/>menu-scan-dialog.tsx 65-85<br/>dedupe by name and size, 1 to 6 files"]
+        Prep["prepareUploadFile<br/>image-utils.ts 52-79<br/>PDF or a small PNG JPEG WebP passes through unchanged,<br/>anything larger is re-encoded on a canvas"]
+        Post["POST /api/menu/scan<br/>multipart files plus venue, venue capped at 200 chars,<br/>no request timeout and no cancel on dialog close"]
+    end
+
+    subgraph Guards["Route guards - the real order the code runs them"]
+        G0["NO_BACKEND 503<br/>when supabaseAdmin is null"]
+        G1["1. 401 UNAUTHORIZED<br/>owner session required - scan/route.ts 54-59"]
+        G2["2. 429 RATE_LIMITED<br/>10 per minute per IP, Retry-After sent - 63-69"]
+        G3["3. 503 NO_KEY fail-fast<br/>before any body is read - 72-77"]
+        G4["4. 413 on Content-Length<br/>over 6 x 12 MB plus 4 MB - 80-86"]
+        G5["5. 400 BAD_BODY then 400 TOO_MANY_FILES<br/>formData parsed first, then 1..6 files - 88-107"]
+        G6["6. 413 per file over 12 MB<br/>per-file cap checked before arrayBuffer - 109-127"]
+    end
+
+    subgraph Scan["runMenuScan - src/lib/menu-scan.ts"]
+        V["Validate files<br/>437-448<br/>TOO_MANY_FILES, FILE_TOO_LARGE, BAD_TYPE"]
+        Up["Upload each file to Mistral Files<br/>166-180, one POST /v1/files per file, serial"]
+        Ocr["OCR each document<br/>249-270, POST /v1/ocr with pages 0-19,<br/>table_format markdown, document_annotation_format json_schema"]
+        Qual["assessOcrQuality on the markdown<br/>ocr-quality.ts 40-81<br/>EMPTY_TEXT, NO_ITEMS, NO_STRUCTURE, TRUNCATED"]
+        Retry{"quality ok"}
+        Sleep["Sleep 1.5 s times the attempt number, then re-OCR the SAME file_id<br/>306-316"]
+        Fail["throw MenuScanError OCR_FAILED<br/>317-320, mapped to HTTP 502"]
+        AiPath["AI path - JSON.parse the document_annotation and keep parsed.categories<br/>479-500"]
+        ParserPath["Deterministic parser - parseOcrMarkdown<br/>381-424, headings become categories, priced lines become items"]
+        BuildAi["buildMenuImport with stats.source set to ai"]
+        BuildFb["buildMenuImport with stats.source set to fallback"]
+        Rec["reconcileImports<br/>menu-import.ts 409-501, union of categories,<br/>parser price wins, AI spelling wins"]
+        Empty{"any products at all"}
+        EmptyThrow["throw MenuScanError EMPTY<br/>511-513, mapped to HTTP 422"]
+        Ok["200 ok true with MenuImportResult<br/>route.ts 131-134"]
+    end
+
+    subgraph Review["Review and merge"]
+        Dialog["Review dialog<br/>menu-scan-dialog.tsx 207-271"]
+        Merge["importMenuFromScan calls mergeMenuImport<br/>onboarding-store.tsx 406-416"]
+        Put["PUT /api/menu<br/>onboarding-store.tsx 226-256, 900 ms debounced autosave"]
+    end
+
+    Pick --> Prep --> Post --> G0 --> G1 --> G2 --> G3 --> G4 --> G5 --> G6 --> V --> Up --> Ocr --> Qual --> Retry
+    Retry -->|"yes"| AiPath
+    Retry -->|"no, attempts remain below 3"| Sleep
+    Sleep --> Ocr
+    Retry -->|"no, third attempt exhausted"| Fail
+    AiPath --> BuildAi --> Rec
+    Ocr -->|"the same markdown also feeds the baseline"| ParserPath
+    ParserPath --> BuildFb --> Rec
+    Rec --> Empty
+    Empty -->|"none"| EmptyThrow
+    Empty -->|"at least one"| Ok --> Dialog --> Merge --> Put
+
+    N_timeout["OCR-06 no timeout<br/>there is exactly one fetch in the pipeline<br/>and no AbortSignal or AbortController anywhere in src,<br/>so a stalled provider has no bound and maxDuration 120<br/>is smaller than the sleep budget of one 6-file scan"]
+    N_memory["OCR-07 memory<br/>the whole multipart body is parsed into memory before any<br/>per-file check, the Content-Length guard is skipped for a<br/>chunked client, and every file is copied again, so peak<br/>memory is roughly 3x the 76 MB upload cap"]
+    N_tables["OCR-04 tables lost<br/>table_format markdown returns tables separately in page.tables<br/>while the page markdown holds only a placeholder,<br/>so a table-laid-out menu is emptied or imported as garbage"]
+    N_annot["OCR-15 annotation type<br/>document_annotation is typed string and JSON.parsed unconditionally,<br/>while Mistral documents the field as a dict"]
+    N_files["OCR-08 files retained<br/>uploaded Mistral file_ids are never deleted,<br/>no DELETE /v1/files exists in src"]
+    N_gate["OCR-05 gate contradicts the parser<br/>items 3 or more with zero headings is rejected as NO_STRUCTURE,<br/>which is exactly the headingless menu the deterministic parser<br/>was written to rescue, so 3 paid OCR calls are burned and the<br/>whole scan fails with OCR_FAILED"]
+    N_price["OCR-02 price corruption<br/>PRICE_SPLIT_RE matches the last digit run, so<br/>Couscous 1 200 is read as name Couscous 1 and price 200"]
+    N_curr["OCR-03 currency and digits<br/>only DT TND the Arabic dinar mark EUR USD and E are stripped,<br/>and the digit class is ASCII only, so a bare dollar sign or<br/>Arabic-Indic digits produce price 0"]
+    N_orphan["OCR-12 orphaned items<br/>items pushed before the first heading are discarded,<br/>and the recovery branch only fires when there is no heading at all"]
+    N_trunc["OCR-13 truncation<br/>TRUNCATED only fires when the last non-noise line is a heading,<br/>so a fragment ending on an item line passes the gate"]
+    N_heic["OCR-11 and LIB-11 upload prep<br/>HEIC and HEIF are offered by the picker but excluded from<br/>PASSTHROUGH_MIME, so iPhone photos fail the canvas decode and<br/>surface as a generic error, and a large PNG passes through<br/>byte for byte, defeating the size cap"]
+    N_rec["OCR-01 reconciler<br/>reconcileImports can return fewer products than the parser<br/>produced, contradicting the invariant stated at menu-import.ts 388-390"]
+    N_review["OCR-10 review truncation<br/>the dialog lists at most 8 items per category while printing the<br/>true totals, and Apply imports everything"]
+    N_merge["OCR-09 silent merge skip<br/>a name collision inside an existing category hits continue,<br/>so the scanned price and description are discarded"]
+    N_put["API-2 and DB-16 destructive sync<br/>PUT /api/menu deletes every category, product and table missing<br/>from the payload and never reads the delete result, while<br/>GET /api/menu turns a query error into an empty collection that<br/>the client then autosaves back"]
+
+    Post -.-> N_timeout
+    G5 -.-> N_memory
+    Ocr -.-> N_tables
+    Ocr -.-> N_annot
+    Up -.-> N_files
+    Qual -.-> N_gate
+    Qual -.-> N_trunc
+    ParserPath -.-> N_price
+    ParserPath -.-> N_curr
+    ParserPath -.-> N_orphan
+    Prep -.-> N_heic
+    Rec -.-> N_rec
+    Dialog -.-> N_review
+    Merge -.-> N_merge
+    Put -.-> N_put
+
+    classDef broken fill:#4a1010,stroke:#ef4444,color:#ffffff
+    classDef warn fill:#3f2d0a,stroke:#f59e0b,color:#ffffff
+    classDef note fill:#1f2937,stroke:#6b7280,color:#e5e7eb,stroke-dasharray:4 3
+    class Prep,Up,Ocr,Qual,ParserPath,Rec,Post,Dialog,Merge,Put broken
+    class G5,AiPath warn
+    class N_timeout,N_memory,N_tables,N_annot,N_files,N_gate,N_price,N_curr,N_orphan,N_trunc,N_heic,N_rec,N_review,N_merge,N_put note

@@ -1,0 +1,84 @@
+%% Sufra - order lifecycle, traced to src/app/api/orders/route.ts (POST),
+%% src/app/api/orders/[id]/route.ts (PATCH) and src/lib/use-orders.ts (poll).
+%% Failure HTTP statuses are on the edges; roles are the ones the code permits,
+%% except the reopen edge, which the audits proved is not gated at all.
+stateDiagram-v2
+    direction TB
+
+    [*] --> Submitted : guest taps Place order - POST /api/orders with slug, tableToken, clientRef, product ids and qty
+
+    state "Rejected - request refused, the guest may retry" as Rejected
+    state "Pending - daily ticket allocated, sitting in the kitchen queue" as Pending
+    state "Accepted - a staff member owns the order" as Accepted
+    state "Accepted and paid - is_paid true, status accepted" as AcceptedPaid
+    state "INCONSISTENT - status pending while is_paid is true" as PendingPaid
+
+    Submitted --> Rejected : 503 NO_OWNER - supabaseAdmin is null, backend unconfigured
+    Submitted --> Rejected : 429 RATE_LIMITED - 60 orders per minute per IP
+    Submitted --> Rejected : 400 BAD_BODY - zod rejects the payload, unknown keys are stripped or refused
+    Submitted --> Rejected : 404 NOT_FOUND - no restaurant with that slug
+    Submitted --> Rejected : 404 BAD_TABLE - qr_token does not belong to that restaurant
+    Submitted --> Rejected : 404 PRODUCT_NOT_FOUND - product id from another restaurant or deleted
+    Submitted --> Rejected : 409 PRODUCT_UNAVAILABLE - product is flagged is_available false
+    Submitted --> Rejected : 422 BAD_AMOUNT - computed total is non-finite or over 10 000 000
+    Submitted --> Rejected : 500 CREATE_ORDER - insert still failing after 8 attempts
+    Submitted --> Rejected : 500 CREATE_ITEMS - order_items insert failed, the order row is deleted again
+    Submitted --> Pending : 200 - server prices from products scoped to restaurant_id, computes the total, calls RPC sufra_next_order_number, inserts orders plus order_items
+    Submitted --> Pending : 200 idempotent replay - client_ref unique violation returns the already stored order instead of creating a second one
+
+    Pending --> Accepted : role owner, Manager or Cashier - PATCH status accepted, attribution stamped from the verified worker session
+    Pending --> Pending : 401 UNAUTHORIZED or 403 FORBIDDEN cross-restaurant or 500 UPDATE - nothing changes
+    Pending --> Pending : role Cashier - 403 FORBIDDEN, a Cashier can never mark an order paid
+    Pending --> PendingPaid : role owner or Manager - PATCH isPaid true while the order is still pending
+    PendingPaid --> Accepted : role owner, Manager or Cashier - PATCH status accepted, is_paid stays true
+    Accepted --> AcceptedPaid : role owner or Manager - PATCH isPaid true, also sets paid_at
+    Accepted --> Accepted : role Cashier - 403 FORBIDDEN, cannot mark paid
+    Accepted --> Accepted : 400 BAD_BODY - owner supplied acceptedBy is not a UUID
+    Accepted --> Pending : REOPEN - any role, the documented gate is NOT enforced
+    AcceptedPaid --> PendingPaid : REOPEN of a paid order - is_paid is left true, the reopen is invisible in the UI
+
+    note right of Submitted
+      Ordering is public and carries no account - the guest sends product ids
+      and quantities only. The browser never sends prices or a total
+      (order-utils.ts 21-32 is a strict schema), the server recomputes
+      everything from products scoped by restaurant_id (API audit verified-working).
+    end note
+
+    note left of Pending
+      Ticket allocation - orders/route.ts 261-278. The primary path is the atomic
+      RPC sufra_next_order_number in migration 1002. If that RPC errors the code
+      falls back to max(daily_order_number)+1 over today's rows, which is not
+      atomic, so the insert is retried up to 8 times on a 23505 collision. The
+      counter also advances when the insert later fails (DB-07).
+    end note
+
+    note right of Pending
+      The dashboard learns about the order by polling GET /api/orders every 3 s
+      (use-orders.ts 50) - so up to 3 s after the 200. There is no push channel,
+      no in-flight guard and no ordering guarantee, so a slow older poll can
+      overwrite fresher state (LIB-07).
+    end note
+
+    note right of Accepted
+      BROKEN GATE - LIB-01 and API-5. worker-permissions.ts 26-28 documents
+      that owners alone may reopen, and canSetArbitraryStatus is referenced only
+      by its own test. orders/[id]/route.ts 82-90 writes status pending with no
+      role check, so any Cashier or Manager can push an accepted order back into
+      the pending column, across devices. The fix is a 403 for
+      body.status pending unless canSetArbitraryStatus(role).
+    end note
+
+    note left of PendingPaid
+      Reachable, and no dashboard renders it correctly. Marking a pending order
+      paid sets is_paid true without touching status, and reopening a paid order
+      sets status pending without clearing is_paid. use-orders.ts 41-44 maps
+      is_paid true to status paid, so the card renders as paid while the kitchen
+      queue still lists it as pending (LIB-01, API-5, API-8).
+    end note
+
+    note right of Rejected
+      POST failures are honest - every path returns a message the guest page
+      reads (guest-menu.tsx 119-143). PATCH failures are not - use-orders.ts
+      57-68 never reads the response, so a 401, 403, 400 or 500 shows a success
+      toast and then silently reverts on the next poll (API-8).
+    end note

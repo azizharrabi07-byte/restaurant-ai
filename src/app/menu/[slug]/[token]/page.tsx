@@ -37,6 +37,7 @@ export default async function GuestMenuPage({
         .select("*")
         .eq("restaurant_id", restaurant.id)
         .eq("is_available", true)
+        .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
       supabaseAdmin
         .from("restaurant_tables")
@@ -78,6 +79,7 @@ export default async function GuestMenuPage({
       categories={cats}
       products={prods}
       tableNumber={table.table_number}
+      tableToken={token}
     />
   );
 }

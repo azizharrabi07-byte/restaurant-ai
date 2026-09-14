@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -38,6 +38,7 @@ interface GuestMenuProps {
   categories?: Category[];
   products?: Product[];
   tableNumber?: number;
+  tableToken?: string;
   unavailable?: boolean;
 }
 
@@ -46,12 +47,20 @@ interface ConfirmState {
   total: number;
 }
 
+/** Persisted per (slug, table) so a refresh keeps the cart and the last order. */
+interface PersistedGuestState {
+  cart: Record<string, number>;
+  confirm: ConfirmState | null;
+  clientRef: string | null;
+}
+
 export function GuestMenu({
   restaurant,
   theme = "classic",
   categories,
   products,
   tableNumber,
+  tableToken,
   unavailable,
 }: GuestMenuProps) {
   const [catId, setCatId] = useState("all");
@@ -60,8 +69,13 @@ export function GuestMenu({
   const [cartOpen, setCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [unavailableIds, setUnavailableIds] = useState<string[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const clientRef = useRef<string | null>(null);
+  const restoredRef = useRef(false);
 
-  const { t, plural, formatPrice } = useI18n();
+  const { t, plural, formatPrice, isAr } = useI18n();
 
   const accent = restaurant?.brandColor.value ?? "#D97706";
   const variant =
@@ -79,6 +93,74 @@ export function GuestMenu({
     brandColor: { value: "#D97706" },
     slug: "",
   };
+
+  const storageSlug = restaurant?.slug ?? "";
+  const storageKey =
+    storageSlug && tableToken ? `sufra.guest.${storageSlug}.${tableToken}` : null;
+
+  const writeGuestState = useCallback(
+    (nextCart: Record<string, number>, nextConfirm: ConfirmState | null) => {
+      if (!storageKey) return;
+      try {
+        const payload: PersistedGuestState = {
+          cart: nextCart,
+          confirm: nextConfirm,
+          clientRef: clientRef.current,
+        };
+        window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
+      } catch {
+        /* sessionStorage unavailable (private mode) — the cart stays in memory */
+      }
+    },
+    [storageKey],
+  );
+
+  // Restore the cart and the last confirmation once, on mount.
+  useEffect(() => {
+    if (!storageKey || restoredRef.current) return;
+    restoredRef.current = true;
+    let saved: PersistedGuestState | null = null;
+    try {
+      const raw = window.sessionStorage.getItem(storageKey);
+      saved = raw ? (JSON.parse(raw) as PersistedGuestState) : null;
+    } catch {
+      saved = null;
+    }
+
+    const names = new Map(prods.map((p) => [p.id, p.name]));
+    const restored: Record<string, number> = {};
+    const dropped: string[] = [];
+    for (const [id, qty] of Object.entries(saved?.cart ?? {})) {
+      const n = Math.floor(Number(qty));
+      if (names.has(id) && Number.isFinite(n) && n > 0) restored[id] = n;
+      else dropped.push(id);
+    }
+    if (Object.keys(restored).length > 0) {
+      setCart(restored);
+      toast.success(t("guest_cartRestored"));
+    }
+    if (dropped.length > 0) {
+      toast.error(t("guest_itemsUnavailable"), {
+        description: dropped.map((id) => names.get(id) ?? id).join(" · "),
+      });
+    }
+    if (saved?.confirm && Number.isFinite(Number(saved.confirm.number))) {
+      setConfirm({
+        number: Number(saved.confirm.number),
+        total: Number(saved.confirm.total),
+      });
+    }
+    if (typeof saved?.clientRef === "string" && saved.clientRef) {
+      clientRef.current = saved.clientRef;
+    }
+    setHydrated(true);
+  }, [storageKey, prods, t]);
+
+  // Mirror the cart + confirmation into sessionStorage for the rest of the session.
+  useEffect(() => {
+    if (!hydrated) return;
+    writeGuestState(cart, confirm);
+  }, [hydrated, cart, confirm, writeGuestState]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -116,30 +198,68 @@ export function GuestMenu({
   const submitOrder = async () => {
     setSubmitting(true);
     try {
+      // One idempotency key per cart: every retry reuses it so the server
+      // recognises a request that already committed instead of creating a
+      // second order. It is replaced only after a confirmed success.
+      if (!clientRef.current) {
+        clientRef.current = crypto.randomUUID();
+        writeGuestState(cart, confirm);
+      }
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           slug: r.slug,
-          tableToken: window.location.pathname.split("/").pop() ?? "",
-          clientRef: crypto.randomUUID(),
+          ...(tableToken ? { tableToken } : {}),
+          clientRef: clientRef.current,
           items: cartItems.map((i) => ({
             productId: i.product.id,
             qty: i.qty,
           })),
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.cloud) {
-        setConfirm({ number: data.order.number, total: data.order.total });
+      const data = (await res.json().catch(() => null)) as {
+        cloud?: boolean;
+        message?: string;
+        order?: { number: number; total: number };
+        productIds?: string[];
+      } | null;
+      if (res.ok && data?.cloud && data.order) {
+        setConfirm({
+          number: Number(data.order.number),
+          total: Number(data.order.total),
+        });
+        setConfirmOpen(true);
         setCart({});
         setCartOpen(false);
+        clientRef.current = null;
       } else {
-        toast.error(
-          typeof data.message === "string" && data.message
-            ? data.message
-            : t("g_counterError"),
-        );
+        // A 409/404 names the offending products; keep an older body working.
+        const gone = Array.isArray(data?.productIds)
+          ? data.productIds.filter((id): id is string => typeof id === "string")
+          : [];
+        if (gone.length > 0) {
+          const names = gone.map((id) => prods.find((p) => p.id === id)?.name ?? id);
+          setUnavailableIds((prev) => Array.from(new Set([...prev, ...gone])));
+          setCart((c) => {
+            const next = { ...c };
+            for (const id of gone) delete next[id];
+            return next;
+          });
+          toast.error(t("guest_itemsUnavailable"), {
+            description: names.join(" · "),
+            action: {
+              label: t("guest_refreshMenu"),
+              onClick: () => window.location.reload(),
+            },
+          });
+        } else {
+          toast.error(
+            typeof data?.message === "string" && data.message
+              ? data.message
+              : t("g_counterError"),
+          );
+        }
       }
     } catch {
       toast.error(t("g_networkError"));
@@ -194,11 +314,13 @@ export function GuestMenu({
           )}
         />
         <div className="absolute top-3 left-0 right-0 flex items-center justify-between px-4">
-          <span className="bg-black/70 backdrop-blur px-3 py-1.5 rounded-full border border-white/10 text-[11px] font-mono flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="min-w-0 truncate bg-black/70 backdrop-blur px-3 py-1.5 rounded-full border border-white/10 text-[11px] font-mono flex items-center gap-1.5 shrink">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             {t("g_dinein", { t: String(tableNo).padStart(2, "0") })}
           </span>
-          <LangCurSwitcher />
+          <span className="shrink-0">
+            <LangCurSwitcher showCurrency={false} />
+          </span>
         </div>
       </div>
 
@@ -288,14 +410,14 @@ export function GuestMenu({
       {/* Search */}
       <div className="px-4 mt-5">
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+          <Search className="w-4 h-4 absolute start-3.5 top-1/2 -translate-y-1/2 text-white/30" />
           <input
             type="text"
             placeholder={t("g_search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className={cn(
-              "w-full bg-[#0D0D0D] text-sm text-white placeholder:text-white/30 pl-10 pr-4 py-2.5",
+              "w-full bg-[#0D0D0D] text-sm text-white placeholder:text-white/30 ps-10 pe-4 py-2.5",
               variant === "minimal"
                 ? "rounded-t-none border-b border-white/15 focus:border-b-white/40 outline-none"
                 : "rounded-xl border border-white/10 focus:outline-none focus:border-white/30",
@@ -380,6 +502,7 @@ export function GuestMenu({
                 <div className="space-y-2.5">
                   {items.map((p) => {
                     const qty = cart[p.id] ?? 0;
+                    const gone = unavailableIds.includes(p.id);
                     const stacked = variant === "vibrant" || variant === "gallery";
                     const minimal = variant === "minimal";
 
@@ -387,7 +510,8 @@ export function GuestMenu({
                       <button
                         type="button"
                         onClick={() => bump(p.id, 1)}
-                        className="text-xs font-semibold flex items-center gap-0.5 cursor-pointer transition-colors hover:opacity-80"
+                        aria-label={`${t("g_add")} ${p.name}`}
+                        className="text-xs font-semibold flex items-center gap-0.5 min-h-11 cursor-pointer transition-colors hover:opacity-80"
                         style={{ color: accent }}
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -397,7 +521,8 @@ export function GuestMenu({
                       <button
                         type="button"
                         onClick={() => bump(p.id, 1)}
-                        className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-full font-semibold text-white shadow cursor-pointer"
+                        aria-label={`${t("g_add")} ${p.name}`}
+                        className="flex items-center gap-1 text-xs px-3 min-h-11 rounded-full font-semibold text-white shadow cursor-pointer"
                         style={{ backgroundColor: accent }}
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -407,39 +532,46 @@ export function GuestMenu({
 
                     const stepper = (
                       <div
-                        className="flex items-center gap-2.5 px-2 py-1 rounded-full shadow"
+                        className="flex items-center rounded-full shadow"
                         style={{ backgroundColor: accent }}
                       >
                         <button
                           type="button"
                           onClick={() => bump(p.id, -1)}
-                          className="p-0.5 text-white/70 hover:text-white cursor-pointer"
+                          aria-label={t("g_decItem", { item: p.name })}
+                          className="w-11 h-11 flex items-center justify-center text-white/70 hover:text-white cursor-pointer"
                         >
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <span className="text-xs font-mono font-bold w-3 text-center">
+                        <span className="text-xs font-mono font-bold w-4 text-center">
                           {qty}
                         </span>
                         <button
                           type="button"
                           onClick={() => bump(p.id, 1)}
-                          className="p-0.5 text-white/70 hover:text-white cursor-pointer"
+                          aria-label={t("g_incItem", { item: p.name })}
+                          className="w-11 h-11 flex items-center justify-center text-white/70 hover:text-white cursor-pointer"
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     );
 
-                    const qtyControl = qty === 0 ? addBtn : stepper;
+                    const qtyControl = gone ? null : qty === 0 ? addBtn : stepper;
 
                     if (minimal) {
                       return (
                         <div
                           key={p.id}
-                          className="flex items-center justify-between gap-3 px-1 py-3 border-b border-white/10"
+                          className={cn(
+                            "flex items-center justify-between gap-3 px-1 py-3 border-b border-white/10",
+                            gone && "opacity-40",
+                          )}
                         >
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-medium leading-snug">{p.name}</h3>
+                            <h3 className={cn("text-sm font-medium leading-snug", gone && "line-through")}>
+                              {p.name}
+                            </h3>
                             {p.description && (
                               <p className="text-xs text-white/35 mt-0.5 line-clamp-1 leading-relaxed">
                                 {p.description}
@@ -460,7 +592,7 @@ export function GuestMenu({
                       return (
                         <div
                           key={p.id}
-                          className="rounded-xl bg-[#0D0D0D] overflow-hidden"
+                          className={cn("rounded-xl bg-[#0D0D0D] overflow-hidden", gone && "opacity-40")}
                           style={
                             variant === "vibrant"
                               ? {
@@ -491,7 +623,7 @@ export function GuestMenu({
                           </div>
                           <div className="p-3">
                             <div className="flex items-start justify-between gap-2">
-                              <h3 className="text-[15px] font-semibold leading-snug">
+                              <h3 className={cn("text-[15px] font-semibold leading-snug", gone && "line-through")}>
                                 {p.name}
                               </h3>
                               <span className="text-sm font-mono font-bold shrink-0">
@@ -514,7 +646,10 @@ export function GuestMenu({
                     return (
                       <div
                         key={p.id}
-                        className="p-3 rounded-xl bg-[#0D0D0D] border border-white/10 flex gap-3"
+                        className={cn(
+                          "p-3 rounded-xl bg-[#0D0D0D] border border-white/10 flex gap-3",
+                          gone && "opacity-40",
+                        )}
                       >
                         {p.image ? (
                           <div className="w-20 h-20 rounded-lg overflow-hidden shrink-0 border border-white/10">
@@ -532,7 +667,9 @@ export function GuestMenu({
                         )}
                         <div className="flex-1 min-w-0 flex flex-col justify-between">
                           <div>
-                            <h3 className="text-sm font-medium leading-snug">{p.name}</h3>
+                            <h3 className={cn("text-sm font-medium leading-snug", gone && "line-through")}>
+                              {p.name}
+                            </h3>
                             {p.description && (
                               <p className="text-xs text-white/40 mt-0.5 line-clamp-2 leading-relaxed">
                                 {p.description}
@@ -562,7 +699,7 @@ export function GuestMenu({
       </div>
 
       {/* Confirmation screen */}
-      {confirm ? (
+      {confirm && confirmOpen ? (
         <div className="fixed inset-0 z-50 bg-[#050505]/95 backdrop-blur flex items-center justify-center px-6">
           <div className="text-center max-w-sm w-full">
             <div
@@ -578,9 +715,9 @@ export function GuestMenu({
             <Button
               type="button"
               className="mt-8 w-full font-bold"
-              onClick={() => setConfirm(null)}
+              onClick={() => setConfirmOpen(false)}
             >
-              <ArrowLeft className="w-4 h-4 text-black" />
+              <ArrowLeft className={cn("w-4 h-4 text-black", isAr && "rotate-180")} />
               {t("g_backMenu")}
             </Button>
           </div>
@@ -600,6 +737,25 @@ export function GuestMenu({
               {plural(cartCount, "common_items_one", "common_items_other")}
             </span>
             <span className="font-mono font-bold text-sm">{formatPrice(cartTotal)}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Order-sent bar — the number stays reachable for the whole session */}
+      {confirm && !confirmOpen && (
+        <div
+          className={cn(
+            "fixed inset-x-0 px-4 z-40",
+            cartCount > 0 ? "bottom-20" : "bottom-4",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            className="w-full flex items-center gap-2 border border-white/15 bg-[#0D0D0D] rounded-2xl px-5 py-3 text-sm font-medium text-white/80 shadow-2xl cursor-pointer hover:text-white"
+          >
+            <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+            <span className="truncate">{t("guest_orderSentBar", { n: confirm.number })}</span>
           </button>
         </div>
       )}
@@ -627,15 +783,17 @@ export function GuestMenu({
                   <button
                     type="button"
                     onClick={() => bump(product.id, -1)}
-                    className="w-7 h-7 rounded-full border border-white/10 text-white/60 hover:text-white flex items-center justify-center cursor-pointer"
+                    aria-label={t("g_decItem", { item: product.name })}
+                    className="w-11 h-11 rounded-full border border-white/10 text-white/60 hover:text-white flex items-center justify-center cursor-pointer"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="w-4 text-center font-mono text-sm">{qty}</span>
+                  <span className="w-6 text-center font-mono text-sm">{qty}</span>
                   <button
                     type="button"
                     onClick={() => bump(product.id, 1)}
-                    className="w-7 h-7 rounded-full border border-white/10 text-white/60 hover:text-white flex items-center justify-center cursor-pointer"
+                    aria-label={t("g_incItem", { item: product.name })}
+                    className="w-11 h-11 rounded-full border border-white/10 text-white/60 hover:text-white flex items-center justify-center cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>

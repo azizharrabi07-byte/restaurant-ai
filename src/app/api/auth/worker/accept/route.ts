@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { WORKER_SESSION_COOKIE, WORKER_SESSION_MAX_AGE } from "@/lib/worker-auth";
+import {
+  WORKER_SESSION_COOKIE,
+  WORKER_SESSION_MAX_AGE,
+  workerSessionCookieOptions,
+} from "@/lib/worker-auth";
 import { newWorkerSessionToken } from "@/lib/worker-invite";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimit, retryAfterHeaders } from "@/lib/rate-limit";
 import type { WorkerRole } from "@/lib/constants";
 
 const schema = z.object({
@@ -38,7 +42,7 @@ export async function POST(req: Request) {
   if (!rate.ok) {
     return NextResponse.json(
       { cloud: false, error: "RATE_LIMITED", message: `try again in ${rate.retryAfterSeconds}s` },
-      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } },
+      { status: 429, headers: retryAfterHeaders(rate) },
     );
   }
 
@@ -60,10 +64,14 @@ export async function POST(req: Request) {
     .eq("invite_token", parsed.data.token)
     .maybeSingle();
 
+  // An invite is only valid with an explicit future deadline: a NULL
+  // `expires_at` (pre-existing rows, or any writer that omits the column) is
+  // not an unlimited-lifetime credential.
   if (
     !invite ||
     (invite.is_used as boolean) === true ||
-    (invite.expires_at && new Date(invite.expires_at as string).getTime() < Date.now())
+    !invite.expires_at ||
+    new Date(invite.expires_at as string).getTime() < Date.now()
   ) {
     return NextResponse.json({ cloud: false, error: "NOT_FOUND" }, { status: 404 });
   }
@@ -83,6 +91,9 @@ export async function POST(req: Request) {
       full_name: parsed.data.name,
       role: invite.role,
       session_token: sessionToken,
+      session_expires_at: new Date(
+        Date.now() + WORKER_SESSION_MAX_AGE * 1000,
+      ).toISOString(),
     })
     .select("id, full_name, role")
     .single();
@@ -90,8 +101,8 @@ export async function POST(req: Request) {
   if (wErr || !worker) {
     const msg = (wErr?.message ?? "").toLowerCase();
     const code = (wErr as { code?: string } | null)?.code;
-    if (code === "42703" || msg.includes("session_token")) {
-      // `session_token` column missing — migration 1002 not applied yet.
+    if (code === "42703" || msg.includes("session_")) {
+      // `session_token`/`session_expires_at` column missing — migration not applied yet.
       return NextResponse.json(
         { cloud: false, error: "NEEDS_MIGRATION", message: "Worker login needs a database update. Ask the owner to run the migration." },
         { status: 503 },
@@ -127,12 +138,10 @@ export async function POST(req: Request) {
       role: worker.role as WorkerRole,
     },
   });
-  res.cookies.set(WORKER_SESSION_COOKIE, sessionToken, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: WORKER_SESSION_MAX_AGE,
-  });
+  res.cookies.set(
+    WORKER_SESSION_COOKIE,
+    sessionToken,
+    workerSessionCookieOptions(WORKER_SESSION_MAX_AGE),
+  );
   return res;
 }

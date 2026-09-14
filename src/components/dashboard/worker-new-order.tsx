@@ -102,11 +102,15 @@ export function WorkerNewOrderDialog({
     }
     setSubmitting(true);
     try {
+      // The API resolves the table by its QR token; this dialog only has the
+      // table number, so look the token up in the delivered table list.
+      const tableToken = tables.find((tb) => tb.number === tableNumber)?.token;
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           slug,
+          tableToken,
           tableNumber,
           items: lines.map((l) =>
             l.productId

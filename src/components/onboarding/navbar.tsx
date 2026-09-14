@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, Smartphone, CloudUpload } from "lucide-react";
+import { RefreshCw, Smartphone, Eye, LogIn } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { BrandMark, BrandWordmark } from "@/components/brand-logo";
@@ -33,7 +33,7 @@ export function Navbar({
             <BrandMark className="scale-90" />
           </div>
           <BrandWordmark />
-          <span className="text-xs uppercase tracking-widest text-white/40 ml-4 border-l border-white/20 pl-4 hidden sm:inline-block">
+          <span className="text-xs uppercase tracking-widest text-white/40 ms-4 border-s border-white/20 ps-4 hidden sm:inline-block">
             {t("ob_partner")}
           </span>
         </Link>
@@ -41,7 +41,7 @@ export function Navbar({
 
       {/* Right: Establishment & Actions */}
       <div className="flex items-center gap-3 sm:gap-5">
-        <div className="text-right hidden md:block">
+        <div className="text-end hidden md:block">
           <p className="text-xs text-white/40 uppercase tracking-tighter">{t("ob_restaurant")}</p>
           <p className="text-sm font-medium text-white truncate max-w-[140px] lg:max-w-[200px]">
             {restaurantName || t("ob_yourCafe")}
@@ -72,10 +72,26 @@ export function Navbar({
             {showLivePreview ? t("ob_hidePreview") : t("ob_sidePreview")}
           </Button>
 
+          {/* The wizard used to be the only destination in the site chrome, so
+              a returning owner had no way back to their account (FE-09). */}
+          <Link
+            href="/auth/login?next=/onboarding"
+            className="inline-flex items-center gap-1.5 text-xs text-white/60 hover:text-white px-2.5 py-1.5 rounded-full border border-white/10 hover:bg-white/5 transition-colors"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span className="text-[11px] uppercase tracking-wider">{t("ob_signIn")}</span>
+          </Link>
+
           {currentStep !== 5 && (
-            <Button type="button" size="sm" onClick={onGoToFinalStep} className="font-bold text-xs">
-              <CloudUpload className="w-3.5 h-3.5 text-black" />
-              {t("ob_publish")}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onGoToFinalStep}
+              className="font-bold text-xs"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              {t("ob_review")}
             </Button>
           )}
         </div>

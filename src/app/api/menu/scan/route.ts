@@ -4,6 +4,7 @@ import {
   MAX_FILES,
   MAX_FILE_BYTES,
   type MenuImportResult,
+  type ScanInputFile,
   runMenuScan,
 } from "@/lib/menu-scan";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -30,9 +31,14 @@ const MAX_VENUE_CHARS = 200;
 
 const STATUS: Record<string, number> = {
   NO_KEY: 503,
+  // A revoked/expired/plan-limited provider key: an operations incident, so it
+  // is reported distinctly from the "not configured" state (OCR-16).
+  PROVIDER_AUTH: 503,
   TOO_MANY_FILES: 400,
   FILE_TOO_LARGE: 413,
   BAD_TYPE: 422,
+  BAD_IMAGE: 422,
+  HEIC: 422,
   UPLOAD_FAILED: 502,
   OCR_FAILED: 502,
   NETWORK: 502,
@@ -76,9 +82,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4. Fail fast on an obviously oversized upload (Content-Length).
-  const contentLength = Number(req.headers.get("content-length") ?? 0);
-  if (contentLength > 0 && contentLength > MAX_BODY_BYTES) {
+  // 4. Fail fast on an obviously oversized upload. `Content-Length` is absent
+  //    under `Transfer-Encoding: chunked`, so a zero/NaN value proves nothing:
+  //    the per-file and running-total checks below are the real bound (OCR-07).
+  const declared = Number(req.headers.get("content-length"));
+  const hasDeclared = Number.isFinite(declared) && declared > 0;
+  if (hasDeclared && declared > MAX_BODY_BYTES) {
     return NextResponse.json(
       { ok: false, error: "FILE_TOO_LARGE" } satisfies ScanResponse,
       { status: 413 },
@@ -106,7 +115,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 5. Enforce the per-file cap BEFORE buffering any file into memory.
+  // 5. Enforce the caps BEFORE buffering anything. `f.size` is the decoder's
+  //    own count, so this bound holds even when the client lied about (or
+  //    omitted) Content-Length.
+  let totalBytes = 0;
   for (const f of rawFiles) {
     if (f.size > MAX_FILE_BYTES) {
       return NextResponse.json(
@@ -114,15 +126,26 @@ export async function POST(req: NextRequest) {
         { status: 413 },
       );
     }
+    totalBytes += f.size;
+  }
+  if (totalBytes > MAX_FILES * MAX_FILE_BYTES) {
+    return NextResponse.json(
+      { ok: false, error: "FILE_TOO_LARGE", detail: "total upload size" } satisfies ScanResponse,
+      { status: 413 },
+    );
   }
 
-  const files: { name: string; mime: string; size: number; buffer: Buffer }[] = [];
+  const files: ScanInputFile[] = [];
   for (const f of rawFiles) {
+    // `arrayBuffer()` gives a fresh ArrayBuffer and `Buffer.from` then copies it
+    // a second time. A `Uint8Array` view over that same ArrayBuffer is what
+    // `uploadDocument` reads, so the bytes are live ONCE here instead of twice
+    // (OCR-07).
+    const view = new Uint8Array(await f.arrayBuffer());
     files.push({
       name: f.name,
       mime: f.type || "application/octet-stream",
-      size: f.size,
-      buffer: Buffer.from(await f.arrayBuffer()),
+      buffer: view,
     });
   }
 

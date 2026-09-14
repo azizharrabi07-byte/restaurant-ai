@@ -1,4 +1,11 @@
-import type { MenuSyncPayload } from "./menu-mapping";
+import { BUSINESS_TYPES } from "./constants";
+import type {
+  MenuSyncCategory,
+  MenuSyncPayload,
+  MenuSyncProduct,
+  MenuSyncRestaurant,
+  MenuSyncTable,
+} from "./menu-mapping";
 
 /**
  * Server-side guards for the menu sync (`PUT /api/menu`) endpoint.
@@ -7,6 +14,9 @@ import type { MenuSyncPayload } from "./menu-mapping";
  * testable. The route layers these on top of the persistence upserts to
  * close the cross-restaurant IDOR (products/tables/categories upserted by id
  * could otherwise rewrite rows owned by another restaurant).
+ *
+ * `validateSyncPayload` also *rebuilds* the payload: the route persists the
+ * normalized copy it returns, never the caller's raw JSON.
  */
 
 export const SYNC_LIMITS = {
@@ -77,11 +87,47 @@ export type ValidateSyncResult =
   | { ok: false; issues: SyncIssue[] };
 
 const HTTP_URL_RE = /^https?:\/\/.+/i;
-const SLUG_RE = /^[a-z0-9-]{0,63}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SLUG_RE = new RegExp(`^[a-z0-9-]{1,${SYNC_LIMITS.slugMax}}$`);
+/** `hexToRgba` renders anything but the 6-digit form as white — reject those. */
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 function label(id: unknown): string {
   const s = typeof id === "string" ? id : "";
   return s.length > 12 ? `${s.slice(0, 12)}...` : s;
+}
+
+const NOUN: Record<"categories" | "products" | "tables", string> = {
+  categories: "category",
+  products: "product",
+  tables: "table",
+};
+
+/**
+ * Ids are written into `uuid` columns and reused as `onConflict:"id"` upsert
+ * keys, so a non-uuid is rejected by Postgres and a repeated one fails the
+ * whole statement (SQLSTATE 21000). Both are rejected here instead.
+ */
+function checkId(
+  issues: SyncIssue[],
+  field: "categories" | "products" | "tables",
+  seen: Set<string>,
+  id: unknown,
+): void {
+  const noun = NOUN[field];
+  if (typeof id !== "string" || !id) {
+    issues.push({ field, message: `${noun} id missing` });
+    return;
+  }
+  if (!UUID_RE.test(id)) {
+    issues.push({ field, message: `${noun} id must be a uuid (${label(id)})` });
+    return;
+  }
+  if (seen.has(id)) {
+    issues.push({ field, message: `duplicate ${noun} id ${label(id)}` });
+    return;
+  }
+  seen.add(id);
 }
 
 export function validateSyncPayload(raw: unknown): ValidateSyncResult {
@@ -93,19 +139,22 @@ export function validateSyncPayload(raw: unknown): ValidateSyncResult {
       issues: [{ field: "body", message: "payload must be an object" }],
     };
   }
-  const payload = raw as Partial<MenuSyncPayload>;
+  const payload = raw as {
+    restaurant?: Partial<MenuSyncRestaurant>;
+    categories?: Partial<MenuSyncCategory>[];
+    products?: Partial<MenuSyncProduct>[];
+    tables?: Partial<MenuSyncTable>[];
+  };
 
-  if (!Array.isArray(payload.categories))
-    issues.push({ field: "categories", message: "must be an array" });
-  if (!Array.isArray(payload.products))
-    issues.push({ field: "products", message: "must be an array" });
-  if (!Array.isArray(payload.tables))
-    issues.push({ field: "tables", message: "must be an array" });
-  if (issues.length > 0) return { ok: false, issues };
-
-  const cats = payload.categories as MenuSyncPayload["categories"];
-  const prods = payload.products as MenuSyncPayload["products"];
-  const tables = payload.tables as MenuSyncPayload["tables"];
+  const cats = payload.categories;
+  const prods = payload.products;
+  const tables = payload.tables;
+  if (!Array.isArray(cats) || !Array.isArray(prods) || !Array.isArray(tables)) {
+    if (!Array.isArray(cats)) issues.push({ field: "categories", message: "must be an array" });
+    if (!Array.isArray(prods)) issues.push({ field: "products", message: "must be an array" });
+    if (!Array.isArray(tables)) issues.push({ field: "tables", message: "must be an array" });
+    return { ok: false, issues };
+  }
 
   if (cats.length > SYNC_LIMITS.categories)
     issues.push({ field: "categories", message: `too many categories (max ${SYNC_LIMITS.categories})` });
@@ -116,23 +165,16 @@ export function validateSyncPayload(raw: unknown): ValidateSyncResult {
 
   const catIds = new Set<string>();
   for (const c of cats) {
-    if (typeof c.id !== "string" || !c.id) {
-      issues.push({ field: "categories", message: "category id missing" });
-    } else {
-      if (catIds.has(c.id)) issues.push({ field: "categories", message: `duplicate category id ${label(c.id)}` });
-      catIds.add(c.id);
-    }
+    checkId(issues, "categories", catIds, c.id);
     if (typeof c.name !== "string" || !c.name.trim() || c.name.length > SYNC_LIMITS.nameMax)
       issues.push({ field: "categories", message: `category name invalid (${label(c.id)})` });
   }
 
+  const productIds = new Set<string>();
   for (const p of prods) {
-    if (typeof p.id !== "string" || !p.id) {
-      issues.push({ field: "products", message: "product id missing" });
-      continue;
-    }
+    checkId(issues, "products", productIds, p.id);
     const key = label(p.id);
-    if (!catIds.has(p.categoryId))
+    if (typeof p.categoryId !== "string" || !catIds.has(p.categoryId))
       issues.push({ field: "products", message: `product ${key} references unknown category ${label(p.categoryId)}` });
     if (typeof p.name !== "string" || !p.name.trim() || p.name.length > SYNC_LIMITS.nameMax)
       issues.push({ field: "products", message: `product ${key} name invalid` });
@@ -147,35 +189,101 @@ export function validateSyncPayload(raw: unknown): ValidateSyncResult {
       issues.push({ field: "products", message: `product ${key} imageUrl must be an http(s) URL` });
     if (typeof p.description !== "string" || p.description.length > SYNC_LIMITS.descriptionMax)
       issues.push({ field: "products", message: `product ${key} description invalid` });
+    if (p.isAvailable !== undefined && typeof p.isAvailable !== "boolean")
+      issues.push({ field: "products", message: `product ${key} isAvailable must be a boolean` });
   }
 
+  const tableIds = new Set<string>();
+  const tokens = new Set<string>();
+  const numbers = new Set<number>();
   for (const t of tables) {
-    if (typeof t.id !== "string" || !t.id)
-      issues.push({ field: "tables", message: "table id missing" });
-    if (!Number.isInteger(t.number) || t.number < 1 || t.number > 9999)
+    checkId(issues, "tables", tableIds, t.id);
+    if (typeof t.number !== "number" || !Number.isInteger(t.number) || t.number < 1 || t.number > 9999) {
       issues.push({ field: "tables", message: `table number must be an integer in [1, 9999] (${label(t.id)})` });
-    if (typeof t.token !== "string" || !t.token || t.token.length > 128)
+    } else if (numbers.has(t.number)) {
+      // `restaurant_tables (restaurant_id, table_number)` is UNIQUE, so the
+      // upsert would fail with 23505 and block the whole sync.
+      issues.push({ field: "tables", message: `duplicate table number ${t.number} (${label(t.id)})` });
+    } else {
+      numbers.add(t.number);
+    }
+    if (typeof t.token !== "string" || !t.token || t.token.length > 128) {
       issues.push({ field: "tables", message: `table token invalid (${label(t.id)})` });
+    } else if (tokens.has(t.token)) {
+      // Two rows sharing a token make `maybeSingle()` error, so every order
+      // from those tables would 404 forever.
+      issues.push({ field: "tables", message: `duplicate table token (${label(t.id)})` });
+    } else {
+      tokens.add(t.token);
+    }
   }
 
   const r = payload.restaurant;
   if (!r || typeof r !== "object") {
-    issues.push({ field: "restaurant", message: "restaurant object required" });
-  } else {
-    if (typeof r.name !== "string" || !r.name.trim() || r.name.length > SYNC_LIMITS.nameMax)
-      issues.push({ field: "restaurant", message: "name invalid" });
-    if (!SLUG_RE.test(r.slug))
-      issues.push({ field: "restaurant", message: "slug invalid (lowercase letters, digits, hyphens)" });
-    if (typeof r.tagline !== "string" || r.tagline.length > 160)
-      issues.push({ field: "restaurant", message: "tagline invalid" });
-    if (typeof r.primaryColor !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(r.primaryColor))
-      issues.push({ field: "restaurant", message: "primaryColor invalid" });
-    for (const url of [r.logoUrl, r.coverUrl]) {
-      if (url != null && url !== "" && !HTTP_URL_RE.test(url))
-        issues.push({ field: "restaurant", message: "logoUrl/coverUrl must be http(s) or null" });
-    }
+    return {
+      ok: false,
+      issues: [...issues, { field: "restaurant", message: "restaurant object required" }],
+    };
+  }
+
+  if (typeof r.name !== "string" || !r.name.trim() || r.name.length > SYNC_LIMITS.nameMax)
+    issues.push({ field: "restaurant", message: "name invalid" });
+  if (typeof r.slug !== "string" || !SLUG_RE.test(r.slug))
+    issues.push({ field: "restaurant", message: "slug invalid (lowercase letters, digits, hyphens)" });
+  if (typeof r.tagline !== "string" || r.tagline.length > 160)
+    issues.push({ field: "restaurant", message: "tagline invalid" });
+  if (typeof r.primaryColor !== "string" || !HEX_COLOR_RE.test(r.primaryColor))
+    issues.push({ field: "restaurant", message: "primaryColor invalid (#RRGGBB)" });
+  if (!BUSINESS_TYPES.some((b) => b.value === r.businessType))
+    issues.push({ field: "restaurant", message: "businessType invalid" });
+  if (r.isPublished !== undefined && typeof r.isPublished !== "boolean")
+    issues.push({ field: "restaurant", message: "isPublished must be a boolean" });
+  for (const url of [r.logoUrl, r.coverUrl]) {
+    if (url != null && url !== "" && !HTTP_URL_RE.test(url))
+      issues.push({ field: "restaurant", message: "logoUrl/coverUrl must be http(s) or null" });
   }
 
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, payload: payload as MenuSyncPayload };
+
+  // Rebuild: everything below was inspected above, so the route can persist
+  // this object as-is. Handing back the caller's raw object is what let
+  // unchecked values (position, isAvailable, isPublished) reach the upserts.
+  return {
+    ok: true,
+    payload: {
+      restaurant: {
+        name: r.name ?? "",
+        slug: r.slug ?? "",
+        tagline: r.tagline ?? "",
+        businessType: r.businessType ?? "",
+        logoUrl: r.logoUrl ?? null,
+        coverUrl: r.coverUrl ?? null,
+        primaryColor: r.primaryColor ?? "",
+        theme: r.theme ?? "classic",
+        isPublished: r.isPublished === true,
+      },
+      categories: cats.map((c) => ({
+        id: c.id ?? "",
+        name: c.name ?? "",
+        position:
+          typeof c.position === "number" && Number.isInteger(c.position) ? c.position : 0,
+      })),
+      products: prods.map((p) => ({
+        id: p.id ?? "",
+        categoryId: p.categoryId ?? "",
+        name: p.name ?? "",
+        description: p.description ?? "",
+        price: p.price ?? 0,
+        imageUrl: p.imageUrl || null,
+        isAvailable: p.isAvailable !== false,
+        position:
+          typeof p.position === "number" && Number.isInteger(p.position) ? p.position : 0,
+      })),
+      tables: tables.map((t) => ({
+        id: t.id ?? "",
+        number: t.number ?? 0,
+        token: t.token ?? "",
+      })),
+    },
+  };
 }

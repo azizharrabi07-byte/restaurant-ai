@@ -1,14 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useI18n } from "@/lib/i18n";
 
 interface AuthFormProps {
   mode: "login" | "signup";
+}
+
+/** Same-origin paths only — never let a query string bounce the owner off-site. */
+function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
+  return raw;
 }
 
 export function AuthForm({ mode }: AuthFormProps) {
@@ -18,8 +25,22 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useI18n();
 
   const isLogin = mode === "login";
+
+  /**
+   * Where the owner was heading before the auth wall. Read after mount rather
+   * than through `useSearchParams` so the server-rendered auth pages need no
+   * extra Suspense boundary.
+   */
+  const [next, setNext] = useState("/dashboard");
+  useEffect(() => {
+    setNext(safeNext(new URLSearchParams(window.location.search).get("next")));
+  }, []);
+
+  const withNext = (path: string) =>
+    next === "/dashboard" ? path : `${path}?next=${encodeURIComponent(next)}`;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,13 +54,16 @@ export function AuthForm({ mode }: AuthFormProps) {
       });
       const data = (await res.json()) as { cloud?: boolean; message?: string };
       if (!res.ok || !data.cloud) {
-        setError(data.message ?? "Something went wrong.");
+        setError(data.message ?? t("au_genericError"));
         return;
       }
-      router.replace("/dashboard");
+      // The menu store reads `/api/auth/session`, so refresh the server tree
+      // first: the dashboard must not render before the provider knows it is
+      // signed in and has left local/demo mode (FE-08).
       router.refresh();
+      router.replace(next);
     } catch {
-      setError("Network error. Please try again.");
+      setError(t("au_networkError"));
     } finally {
       setSubmitting(false);
     }
@@ -57,24 +81,22 @@ export function AuthForm({ mode }: AuthFormProps) {
 
         <div className="bg-[#0D0D0D] border border-white/10 rounded-2xl p-6">
           <h1 className="font-serif italic text-2xl">
-            {isLogin ? "Welcome back" : "Create your account"}
+            {isLogin ? t("au_welcomeBack") : t("au_createAccountTitle")}
           </h1>
           <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
-            {isLogin
-              ? "Sign in to manage your restaurant."
-              : "Set up owner access. This binds your account to this restaurant."}
+            {isLogin ? t("au_loginDesc") : t("au_signupDesc")}
           </p>
 
           <form onSubmit={submit} className="mt-6 space-y-3">
             {!isLogin && (
               <div>
                 <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono">
-                  Name
+                  {t("au_name")}
                 </label>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
+                  placeholder={t("au_namePh")}
                   className="mt-1.5"
                   autoComplete="name"
                 />
@@ -82,7 +104,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             )}
             <div>
               <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono">
-                Email
+                {t("au_email")}
               </label>
               <Input
                 type="email"
@@ -96,7 +118,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             </div>
             <div>
               <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono">
-                Password
+                {t("au_password")}
               </label>
               <Input
                 type="password"
@@ -104,7 +126,7 @@ export function AuthForm({ mode }: AuthFormProps) {
                 minLength={isLogin ? 6 : 8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={isLogin ? "••••••••" : "At least 8 characters"}
+                placeholder={isLogin ? "••••••••" : t("au_passwordNewPh")}
                 className="mt-1.5"
                 autoComplete={isLogin ? "current-password" : "new-password"}
               />
@@ -115,15 +137,16 @@ export function AuthForm({ mode }: AuthFormProps) {
             )}
 
             <Button type="submit" className="w-full mt-1" disabled={submitting}>
-              {submitting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : null}
-              {isLogin ? "Sign in" : "Create account"}
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {isLogin ? t("au_signIn") : t("au_createAccount")}
             </Button>
             {isLogin && (
               <p className="text-center text-xs text-white/40">
-                <a href="/auth/forgot" className="underline underline-offset-4 hover:text-white">
-                  Forgot password?
+                <a
+                  href="/auth/forgot"
+                  className="underline underline-offset-4 hover:text-white"
+                >
+                  {t("au_forgot")}
                 </a>
               </p>
             )}
@@ -133,16 +156,22 @@ export function AuthForm({ mode }: AuthFormProps) {
         <p className={cn("text-xs text-white/40 text-center mt-5")}>
           {isLogin ? (
             <>
-              First time?{" "}
-              <a href="/auth/signup" className="text-white/80 underline underline-offset-4 hover:text-white">
-                Create an account
+              {t("au_firstTime")}{" "}
+              <a
+                href={withNext("/auth/signup")}
+                className="text-white/80 underline underline-offset-4 hover:text-white"
+              >
+                {t("au_createAccount")}
               </a>
             </>
           ) : (
             <>
-              Already have an account?{" "}
-              <a href="/auth/login" className="text-white/80 underline underline-offset-4 hover:text-white">
-                Sign in
+              {t("au_haveAccount")}{" "}
+              <a
+                href={withNext("/auth/login")}
+                className="text-white/80 underline underline-offset-4 hover:text-white"
+              >
+                {t("au_signIn")}
               </a>
             </>
           )}

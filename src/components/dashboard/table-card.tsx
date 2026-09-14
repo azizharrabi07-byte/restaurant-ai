@@ -1,4 +1,5 @@
 import { Download } from "lucide-react";
+import { toast } from "sonner";
 import type { MenuTable } from "@/lib/constants";
 import { useI18n } from "@/lib/i18n";
 import { downloadQrPng } from "@/lib/qr";
@@ -9,10 +10,27 @@ interface TableCardProps {
   menuUrl: string;
   restaurantName: string;
   brandColor: string;
+  /** A QR code for a restaurant that was never saved points at nothing. */
+  disabled?: boolean;
 }
 
-export function TableCard({ table, menuUrl, restaurantName, brandColor }: TableCardProps) {
+export function TableCard({
+  table,
+  menuUrl,
+  restaurantName,
+  brandColor,
+  disabled = false,
+}: TableCardProps) {
   const { t } = useI18n();
+
+  const handleDownload = async () => {
+    try {
+      await downloadQrPng(menuUrl, `${restaurantName}-table-${table.number}.png`);
+    } catch {
+      toast.error(t("tb_qrFailed"));
+    }
+  };
+
   return (
     <div className="rounded-xl border border-white/10 bg-[#0D0D0D] overflow-hidden animate-fade-up">
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
@@ -46,8 +64,9 @@ export function TableCard({ table, menuUrl, restaurantName, brandColor }: TableC
       <div className="px-4 pb-4">
         <button
           type="button"
-          onClick={() => downloadQrPng(menuUrl, `${restaurantName}-table-${table.number}.png`)}
-          className="w-full inline-flex items-center justify-center gap-2 h-9 rounded-full text-xs font-semibold text-white/70 border border-white/10 bg-transparent hover:bg-white/5 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
+          onClick={handleDownload}
+          disabled={disabled}
+          className="w-full inline-flex items-center justify-center gap-2 h-9 rounded-full text-xs font-semibold text-white/70 border border-white/10 bg-transparent hover:bg-white/5 hover:text-white hover:border-white/20 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/70"
         >
           <Download className="w-3.5 h-3.5" />
           {t("tb_downloadQr")}

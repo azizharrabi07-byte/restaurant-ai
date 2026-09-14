@@ -43,7 +43,10 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
   const [generating, setGenerating] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
-  const displayName = restaurantName || "Velvet & Stone Coffee";
+  const displayName = restaurantName || t("ob_yourCafe");
+  // `Cashier`/`Manager` stay the wire values (they are the SelectItem values and
+  // what the API stores); only the display is translated (I18N-09).
+  const roleLabel = role === "Manager" ? t("wk_manager") : t("wk_cashier");
   // Server-minted links carry no role/name in the URL: the accept page reads
   // everything from the server. Local (demo) links keep the legacy params.
   const [localLink, setLocalLink] = useState(false);
@@ -55,6 +58,13 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
       : `${appBaseUrl()}/worker/invite/${token}`
     : "";
 
+  const mintLocalInvite = () => {
+    const localToken = makeToken("invite");
+    setLocalLink(true);
+    setToken(localToken);
+    createInvite(role, localToken);
+  };
+
   const handleGenerate = async () => {
     setGenerating(true);
     setServerError(null);
@@ -64,8 +74,13 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
       });
-      const data = (await res.json()) as { cloud?: boolean; inviteToken?: string; error?: string };
-      if (res.ok && data.cloud && typeof data.inviteToken === "string") {
+      const data = (await res.json().catch(() => null)) as {
+        cloud?: boolean;
+        inviteToken?: string;
+        error?: string;
+        message?: string;
+      } | null;
+      if (res.ok && data?.cloud && typeof data.inviteToken === "string") {
         setLocalLink(false);
         setToken(data.inviteToken);
         return;
@@ -74,13 +89,22 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
         setServerError(t("inv_needLogin"));
         return;
       }
-      throw new Error(data.error ?? "invite failed");
+      if (res.status === 429) {
+        setServerError(t("inv_rateLimited", { s: res.headers.get("Retry-After") ?? "60" }));
+        return;
+      }
+      if (res.status === 503 && data?.error === "NO_BACKEND") {
+        // No backend configured: a local demo invite is the only option.
+        mintLocalInvite();
+        return;
+      }
+      // A live server refused (403/404/500/…). Minting a local link here would
+      // hand out a QR that yields a device with no server session, so report
+      // the failure instead of presenting it as a valid invite.
+      setServerError(data?.message ?? t("inv_serverError"));
     } catch {
-      // Offline/demo mode: fall back to a local-only invite.
-      const t = makeToken("invite");
-      setLocalLink(true);
-      setToken(t);
-      createInvite(role, t);
+      // Offline/demo mode: the request never reached the server.
+      mintLocalInvite();
     } finally {
       setGenerating(false);
     }
@@ -127,8 +151,8 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Cashier">Cashier</SelectItem>
-                    <SelectItem value="Manager">Manager</SelectItem>
+                    <SelectItem value="Cashier">{t("wk_cashier")}</SelectItem>
+                    <SelectItem value="Manager">{t("wk_manager")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -155,13 +179,13 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                 {t("inv_readyTitle")}
               </DialogTitle>
               <DialogDescription>
-                {t("inv_readyDesc", { role })}
+                {t("inv_readyDesc", { role: roleLabel })}
               </DialogDescription>
             </DialogHeader>
 
             <div className="flex flex-col items-center gap-4 pt-2">
               <div className="bg-white rounded-xl p-3 shadow-sm">
-                <QrImage value={link} size={168} alt={`${role} invite QR`} />
+                <QrImage value={link} size={168} alt={`${roleLabel} invite QR`} />
               </div>
 
               <div className="w-full space-y-1">
@@ -184,7 +208,7 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
                 </div>
                 <div className="flex items-center justify-between pt-1.5">
                   <span className="text-[10px] font-mono uppercase tracking-widest text-white/35">
-                    {t("inv_expires24Short", { role })}
+                    {t("inv_expires24Short", { role: roleLabel })}
                   </span>
                   <span className={cn("text-[10px] font-mono text-amber-400/90 uppercase")}>
                     {t("inv_awaiting")}

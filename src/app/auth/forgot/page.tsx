@@ -1,8 +1,12 @@
 import { redirect } from "next/navigation";
 import { getOwnerSessionForRsc } from "@/lib/owner-auth";
 import { ForgotForm } from "@/components/forgot-form";
+import { translate } from "@/lib/locale";
+import { currentLang } from "@/lib/server-locale";
 
-export const metadata = { title: "Forgot password — Sufra" };
+export async function generateMetadata() {
+  return { title: translate(await currentLang(), "meta_forgot") };
+}
 
 export default async function ForgotPage() {
   const session = await getOwnerSessionForRsc();

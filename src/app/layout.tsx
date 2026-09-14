@@ -3,20 +3,31 @@ import "./globals.css";
 import { ToasterProvider } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
 import { AuthHashForwarder } from "@/components/auth-hash-forwarder";
+import { LANG_DIR, translate } from "@/lib/locale";
+import { localeForRequest } from "@/lib/server-locale";
 
-export const metadata: Metadata = {
-  title: "Sufra — QR Menu for Restaurants",
-  description:
-    "Build your digital menu in minutes. Let customers scan, browse, and order from their phones.",
-};
 
-export default function RootLayout({
+export async function generateMetadata(): Promise<Metadata> {
+  const { lang } = await localeForRequest();
+  return {
+    title: translate(lang, "meta_title"),
+    description: translate(lang, "meta_desc"),
+  };
+}
+
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { lang, cur } = await localeForRequest();
   return (
-    <html lang="en" className="scroll-smooth" suppressHydrationWarning>
+    <html
+      lang={lang}
+      dir={LANG_DIR[lang]}
+      className="scroll-smooth"
+      suppressHydrationWarning
+    >
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -28,7 +39,9 @@ export default function RootLayout({
       <body className="min-h-dvh bg-background text-foreground antialiased">
         <ToasterProvider />
         <AuthHashForwarder />
-        <Providers>{children}</Providers>
+        <Providers initialLang={lang} initialCur={cur}>
+          {children}
+        </Providers>
       </body>
     </html>
   );

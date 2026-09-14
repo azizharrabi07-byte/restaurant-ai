@@ -42,9 +42,9 @@ export function StepBranding({ headingEyebrow }: { headingEyebrow?: string }) {
   };
 
   return (
-    <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="max-w-2xl mx-auto text-start animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
-        eyebrow={headingEyebrow ?? "Step 02 · Aesthetics"}
+        eyebrow={headingEyebrow ?? t("ob_eyebrow2")}
         title={t("br_title")}
         description={t("br_desc")}
       />
@@ -78,7 +78,7 @@ export function StepBranding({ headingEyebrow }: { headingEyebrow?: string }) {
                   key={p.id}
                   type="button"
                   onClick={() => handleSelectColor(p)}
-                  className={`p-3 rounded-lg border flex items-center gap-3 transition-all cursor-pointer text-left ${
+                  className={`p-3 rounded-lg border flex items-center gap-3 transition-all cursor-pointer text-start ${
                     isSelected
                       ? "bg-[#1A1A1A] border-white/40 ring-1 ring-white/20 shadow-sm"
                       : "bg-[#111111] border-white/10 hover:border-white/20"
@@ -148,7 +148,7 @@ export function StepBranding({ headingEyebrow }: { headingEyebrow?: string }) {
                   key={themeOpt.id}
                   type="button"
                   onClick={() => setTheme(themeOpt.id)}
-                  className={`p-3 rounded-lg border flex items-center gap-3.5 transition-all cursor-pointer text-left ${
+                  className={`p-3 rounded-lg border flex items-center gap-3.5 transition-all cursor-pointer text-start ${
                     isSelected
                       ? "bg-[#1A1A1A] border-white/40 ring-1 ring-white/20 shadow-sm"
                       : "bg-[#111111] border-white/10 hover:border-white/20"

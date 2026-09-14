@@ -6,10 +6,11 @@ import {
 } from "@/lib/owner-auth";
 import {
   computeOrderTotal,
+  nextOrderNumberFor,
   validateOrderBody,
 } from "@/lib/order-utils";
+import { checkRateLimit, retryAfterHeaders } from "@/lib/rate-limit";
 import { getWorkerSession } from "@/lib/worker-auth";
-import { checkRateLimit } from "@/lib/rate-limit";
 import type { ParsedOrderLine } from "@/lib/order-utils";
 
 const mapOrder = (order: Record<string, unknown>, items: { name: string; qty: number; price: number }[]) => ({
@@ -94,9 +95,11 @@ function dayStartIso(): string {
 /**
  * Allocate the next daily order number for a restaurant. Primary path is the
  * atomic `sufra_next_order_number` RPC (migration 1002). If that function is
- * not deployed yet, falls back to max(daily_order_number)+1 — non-atomic
- * until the migration's unique index exists, so callers must retry on unique
- * violations. Never returns the legacy `?? 1000 + 1` value.
+ * not deployed yet, falls back to max(daily_order_number)+1 via
+ * `nextOrderNumberFor` — the pure, tested form of the formula — which is
+ * non-atomic until the migration's unique index exists, so callers must retry
+ * on unique violations. It always increments the previous max, never repeating
+ * it (the legacy `max ?? 1000 + 1` precedence bug).
  */
 async function allocateOrderNumber(restaurantId: string): Promise<number> {
   if (supabaseAdmin) {
@@ -112,8 +115,8 @@ async function allocateOrderNumber(restaurantId: string): Promise<number> {
     .gte("created_at", dayStartIso())
     .order("daily_order_number", { ascending: false })
     .limit(1);
-  const currentMax = last?.[0]?.daily_order_number as number | null | undefined;
-  return (currentMax ?? 1000) + 1;
+  const currentMax = (last?.[0]?.daily_order_number ?? null) as number | null;
+  return nextOrderNumberFor(currentMax);
 }
 
 interface PricedLine {
@@ -197,7 +200,7 @@ export async function POST(req: Request) {
         error: "RATE_LIMITED",
         message: `Too many orders. Try again in ${rate.retryAfterSeconds}s.`,
       },
-      { status: 429 },
+      { status: 429, headers: retryAfterHeaders(rate) },
     );
   }
 

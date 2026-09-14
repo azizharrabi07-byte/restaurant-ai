@@ -22,21 +22,29 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# local env files — never commit real values
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# covers .env.local, .env.development.local, .env.test.local, .env.staging.local, …
+.env*.local
 *.tsbuildinfo
 next-env.d.ts
 
-# supabase
-supabase/.branches
-supabase/.temp
+# supabase CLI scratch state (supabase/config.toml and supabase/migrations/ ARE tracked)
+supabase/.branches/
+supabase/.temp/
 
 # n8n local data
 .n8n/
+
+# n8n phantom directory: nothing in src/ or docker-compose.yml references n8n, but
+# the old `./n8n` bind mount made Compose silently create this empty directory.
+n8n/
+
+# repowise index / caches
+.repowise/
+
+# audit scratch space — docs/audit/*.md are deliverables and stay tracked
+docs/audit/_scratch/
 
 # dev server logs
 .dev.log

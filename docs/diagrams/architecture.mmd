@@ -1,0 +1,109 @@
+%% Sufra - runtime architecture AS BUILT (not as README.md claims).
+%% Every node cites the file or endpoint that implements it; finding IDs are
+%% from docs/audit/*.md. Verified: npx next build succeeds with zero env vars, 29 routes.
+flowchart TB
+    subgraph Clients["Client surfaces in the browser"]
+        Landing["Public landing page<br/>src/app/page.tsx + src/lib/landing-i18n.tsx<br/>EN / FR / AR, no account"]
+        OwnerDash["Owner dashboard and onboarding wizard<br/>src/app/(owner)/dashboard/* and src/app/onboarding/*<br/>owner account, cookie sufra_owner_session"]
+        WorkerTerm["Worker terminal<br/>src/app/(worker)/worker/*<br/>cookie sufra_worker_session"]
+        GuestMenu["Guest menu<br/>src/app/menu/[slug]/[token] and src/components/guest-menu.tsx<br/>NO ACCOUNT - ordering is public by design, server-priced"]
+        NoDirect["BLOCKED PATH - the browser never talks to Supabase<br/>there is no anon-key client, no anon key env var, and no use-client module that imports the admin client<br/>the only importers of src/lib/supabase-admin.ts are 18 of the 20 API route files, the guest RSC,<br/>owner-auth.ts and worker-auth.ts - see owner-auth.ts:8<br/>RLS is defense-in-depth only (DB-06)"]
+    end
+
+    subgraph App["Next.js 15 app server - App Router, 29 routes, service role only"]
+        subgraph Pub["Public routes - no session required"]
+            A_login["POST /api/auth/login"]
+            A_signup["POST /api/auth/signup"]
+            A_recover["POST /api/auth/recover"]
+            A_reset["POST /api/auth/reset"]
+            A_callback["POST /api/auth/callback"]
+            A_logout["POST /api/auth/logout"]
+            A_session["GET /api/auth/session"]
+            A_health["GET /api/health"]
+            A_inviteget["GET /api/auth/worker/invite/[token]"]
+            A_accept["POST /api/auth/worker/accept"]
+            A_orderpost["POST /api/orders<br/>guest order - custom lines require a worker session"]
+        end
+        subgraph Own["Owner-session routes"]
+            A_menuput["PUT /api/menu"]
+            A_scan["POST /api/menu/scan"]
+            A_password["POST /api/auth/password"]
+            A_invite["POST /api/auth/worker/invite<br/>no rate limit (API-9)"]
+            A_workers["GET /api/workers<br/>NO CLIENT CALLER (API-13)"]
+            A_workerdel["DELETE /api/workers/[id]<br/>the only worker revocation path, unreachable (API-13)"]
+        end
+        subgraph Wrk["Worker-session routes"]
+            A_me["GET /api/auth/worker/me"]
+        end
+        subgraph Both["Owner-or-worker routes"]
+            A_menuget["GET /api/menu"]
+            A_ordersget["GET /api/orders"]
+            A_orderpatch["PATCH /api/orders/[id]"]
+            A_upload["POST /api/upload"]
+        end
+        RSC["Guest menu RSC<br/>src/app/menu/[slug]/[token]/page.tsx<br/>server-rendered HTML, reads the database directly"]
+        Admin["supabaseAdmin<br/>src/lib/supabase-admin.ts<br/>SERVICE-ROLE client - bypasses RLS<br/>null when NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing"]
+    end
+
+    subgraph Supa["Supabase"]
+        PG["Postgres<br/>restaurants, categories, products, restaurant_tables,<br/>orders, order_items, workers, worker_invites, sufra_daily_counters<br/>RPC sufra_next_order_number<br/>RLS enabled, bypassed by the service role"]
+        GoTrue["GoTrue auth<br/>auth.users - owner email and password"]
+        Store["Storage bucket menu-images - public read"]
+    end
+
+    subgraph Mistral["Mistral API"]
+        MFiles["Files API<br/>POST /v1/files"]
+        MOcr["OCR<br/>POST /v1/ocr with document_annotation json_schema"]
+    end
+
+    Landing -->|"POST /api/auth/login, signup, recover, reset"| A_login
+    OwnerDash -->|"POST /api/auth/login - sets HttpOnly cookie sufra_owner_session, 60 days"| A_login
+    OwnerDash -->|"POST /api/auth/logout - clears both cookies, no server-side revoke (LIB-03)"| A_logout
+    OwnerDash -->|"PUT /api/menu - debounced 900 ms autosave"| A_menuput
+    OwnerDash -->|"POST /api/menu/scan - multipart files and venue"| A_scan
+    OwnerDash -->|"POST /api/upload - multipart file, 5 MB cap"| A_upload
+    OwnerDash -->|"POST /api/auth/worker/invite - mint a one-time invite"| A_invite
+    OwnerDash -->|"GET /api/orders - poll every 3 s"| A_ordersget
+    OwnerDash -->|"PATCH /api/orders/[id] - accept, mark paid, reopen"| A_orderpatch
+    WorkerTerm -->|"POST /api/auth/worker/accept - invite token, sets cookie sufra_worker_session, 7 days client-side only (LIB-02)"| A_accept
+    WorkerTerm -->|"GET /api/auth/worker/me - session self-check"| A_me
+    WorkerTerm -->|"GET /api/orders - poll every 3 s"| A_ordersget
+    WorkerTerm -->|"PATCH /api/orders/[id] - accept, Cashier can never mark paid"| A_orderpatch
+    GuestMenu -->|"POST /api/orders - slug, tableToken, clientRef, product ids and qty only"| A_orderpost
+    GuestMenu -.->|"this path does not exist"| NoDirect
+
+    A_login -->|"GoTrue signInWithPassword then GET /auth/v1/user"| Admin
+    A_signup -->|"GoTrue admin createUser, then restaurants UPDATE to rebind the owner"| Admin
+    A_recover -->|"GoTrue resetPasswordForEmail"| Admin
+    A_reset -->|"GoTrue verifyOtp then admin updateUserById"| Admin
+    A_callback -->|"GoTrue getUser on the implicit-grant token"| Admin
+    A_password -->|"GoTrue admin updateUserById"| Admin
+    A_session -->|"GoTrue getUser"| Admin
+    A_inviteget -->|"SELECT worker_invites plus embedded restaurants"| Admin
+    A_accept -->|"INSERT workers, conditional UPDATE worker_invites"| Admin
+    A_orderpost -->|"SELECT restaurants, restaurant_tables, products, RPC sufra_next_order_number, INSERT orders and order_items"| Admin
+    A_menuput -->|"UPDATE restaurants, UPSERT and DELETE categories, products, restaurant_tables"| Admin
+    A_scan -->|"GoTrue session verify only - the scan path performs no database write"| Admin
+    A_invite -->|"INSERT worker_invites"| Admin
+    A_workers -->|"SELECT restaurants, workers"| Admin
+    A_workerdel -->|"DELETE workers"| Admin
+    A_me -->|"SELECT workers by session_token"| Admin
+    A_menuget -->|"SELECT restaurants, categories, products, restaurant_tables"| Admin
+    A_ordersget -->|"SELECT orders plus order_items plus restaurant_tables, limit 60"| Admin
+    A_orderpatch -->|"SELECT orders and restaurants, UPDATE orders"| Admin
+    A_upload -->|"Storage upload into menu-images, then getPublicUrl"| Admin
+    RSC -->|"SELECT restaurants by slug, categories, products, restaurant_tables by qr_token"| Admin
+
+    Admin ==>|"HTTPS apikey = SUPABASE_SERVICE_ROLE_KEY - server-only env var, never sent to the browser"| PG
+    Admin ==>|"GoTrue admin API with the service-role key"| GoTrue
+    Admin ==>|"Storage API with the service-role key"| Store
+    A_scan ==>|"Authorization Bearer = MISTRAL_API_KEY - server-only env var"| MFiles
+    A_scan ==>|"POST /v1/ocr with the returned file_id, model mistral-ocr-latest"| MOcr
+    MFiles -.->|"file_id, passed back through the app to the OCR call"| MOcr
+
+    classDef cred fill:#0b3a2e,stroke:#10b981,color:#ffffff
+    classDef blocked fill:#4a1010,stroke:#ef4444,color:#ffffff
+    classDef ghost fill:#2b2b2b,stroke:#9ca3af,color:#ffffff,stroke-dasharray:4 3
+    class Admin cred
+    class NoDirect blocked
+    class A_workers,A_workerdel ghost

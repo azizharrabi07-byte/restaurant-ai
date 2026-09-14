@@ -175,9 +175,9 @@ export function StepProducts({ headingEyebrow }: { headingEyebrow?: string }) {
   const getCategoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? t("spl_menuFallback");
 
   return (
-    <div className="max-w-2xl mx-auto text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="max-w-2xl mx-auto text-start animate-in fade-in slide-in-from-bottom-2 duration-300">
       <StepHeading
-        eyebrow={headingEyebrow ?? "Step 04 · Products"}
+        eyebrow={headingEyebrow ?? t("ob_eyebrow4")}
         title={t("sp_title")}
         description={t("sp_desc")}
       >

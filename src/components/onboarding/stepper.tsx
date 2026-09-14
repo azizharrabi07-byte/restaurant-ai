@@ -86,7 +86,7 @@ export function Stepper({ currentStep, onSelectStep }: StepperProps) {
                     type="button"
                     onClick={() => onSelectStep(s.step)}
                     className={cn(
-                      "w-full text-left py-2 px-3 rounded-lg transition-colors flex items-center gap-3.5 group cursor-pointer",
+                      "w-full text-start py-2 px-3 rounded-lg transition-colors flex items-center gap-3.5 group cursor-pointer",
                       isActive ? "bg-white/[0.04]" : "hover:bg-white/[0.02]",
                     )}
                   >
