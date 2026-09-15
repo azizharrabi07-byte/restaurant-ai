@@ -36,6 +36,9 @@ Environment (`.env.local`):
 | `SUPABASE_SERVICE_ROLE_KEY` | **server-only** service role key. Never commit a real value. |
 | `MISTRAL_API_KEY` | **server-only** Mistral key for menu OCR scanning |
 | `MISTRAL_OCR_MODEL` | optional OCR model override (default `mistral-ocr-latest`) |
+| `NVIDIA_API_KEY` | **optional — server-only.** NVIDIA NIM key for the LLM menu-structuring pass (§6). Leave it unset and the scanner works exactly as before: the pass logs `STRUCTURE LLM ok:false reason:NO_KEY` and is skipped, with no error surfaced to the user. |
+| `NVIDIA_BASE_URL` | optional override of the NIM base URL (default `https://integrate.api.nvidia.com/v1`) |
+| `NVIDIA_MODEL` | optional model override (default `meta/llama-3.2-11b-vision-instruct`). Only a few models are entitled per NVIDIA account — see the trap in §6 before changing it. |
 | `NEXT_PUBLIC_APP_URL` | **optional — commented out by default.** Canonical URL for the links the product hands out (QR codes, worker invites, password recovery). Leave it unset and they follow the origin the request came through; setting it pins them to whatever you write. See §3. |
 | `SUFRA_RATE_LIMIT_DISABLED` | set to `1` to disable rate limiting (dev/tests only) |
 | `SUFRA_PLACEHOLDER_OWNER_EMAIL` | optional override for the legacy auto-provisioned owner email matched at signup |
@@ -240,6 +243,7 @@ lint, typecheck and unit tests. `docs/RUNBOOK.md` §4 (which files to run) and �
 | Owner dashboard | `src/app/(owner)/dashboard/` |
 | Worker terminal + invite accept | `src/app/(worker)/worker/`, `src/app/api/auth/worker/` |
 | Guest menu (scan → order) | `src/app/menu/[slug]/[token]/`, `src/components/guest-menu.tsx` |
+| Menu scan pipeline (OCR → annotation + parser + NVIDIA structurer → validator) | `src/lib/menu-scan.ts`, `src/lib/menu-structure-llm.ts`, `src/lib/menu-validate.ts` |
 | Menu sync API (validation + IDOR guard) | `src/app/api/menu/`, `src/lib/menu-mapping.ts`, `src/lib/menu-sync-guard.ts` |
 | Orders API (server pricing, atomic numbers) | `src/app/api/orders/`, `src/lib/order-utils.ts` |
 | Image upload → Supabase Storage | `src/app/api/upload/`, `src/components/image-dropzone.tsx` |
@@ -275,11 +279,21 @@ Server:   upload each file to Mistral Files (25 s timeout each)
             (up to OCR_QUALITY_ATTEMPTS = 3), and the structurally fittest attempt is kept
           → buildMenuImport(annotation)                 [stats.source = "ai"]
           → parseOcrMarkdown() deterministic parser      [stats.source = "fallback"]
-          → reconcileImports(ai, parser) → one MenuImportResult → onboarding store
+          → structureMenuWithLlm(markdown) NVIDIA NIM    [stats.source = "llm"]
+            (skipped with NO_KEY when NVIDIA_API_KEY is unset; a timeout, an
+             outage or a malformed reply degrades to the path below, never fails
+             the scan)
+          → when the LLM answered: mergeStructuredMenu(llm, parser)   [llm / llm+parser]
+            else:                reconcileImports(ai, parser)
+          → validateMenuImport(...) pure deterministic gate — removes what a
+            menu must not contain (dropped rows are logged, never silently lost)
+          → one MenuImportResult → onboarding store
           → finally: DELETE every uploaded Mistral document (best effort)
 Everything after the size caps shares one 110 s budget (SCAN_BUDGET_MS), below the
 route's maxDuration = 120, so a hanging provider ends in a typed error instead of
-the platform killing the request with no message and no result.
+the platform killing the request with no message and no result. The NVIDIA call
+gets a 60 s per-attempt budget clipped by that same deadline, so it cannot outlive
+the scan either.
 ```
 
 Key files:
@@ -287,30 +301,92 @@ Key files:
 | File | Role |
 | --- | --- |
 | `src/app/api/menu/scan/route.ts` | Route contract + error→HTTP mapping |
-| `src/lib/menu-scan.ts` | Orchestration: upload, OCR under a shared deadline, quality retries, both extractors, reconcile, document cleanup, stage logs |
+| `src/lib/menu-scan.ts` | Orchestration: upload, OCR under a shared deadline, quality retries, both Mistral extractors, the NVIDIA structurer, merge + validate, document cleanup, stage logs |
 | `src/lib/ocr-quality.ts` | Pure deterministic gate that flags degraded OCR responses |
 | `src/lib/menu-import.ts` | Pure pipeline: normalize (incl. Arabic-Indic digits) → sanitize → build → reconcile |
+| `src/lib/menu-structure-llm.ts` | **server-only** NVIDIA NIM structurer: OCR markdown → the item/description/header/junk shape, under a 60 s-per-attempt budget; also owns the `NVIDIA_*` env reads and `hasLlmBackend()` |
+| `src/lib/menu-validate.ts` | Pure (no `"server-only"`): the prompt contract (`MENU_STRUCTURE_RULES`), the defensive reply parser (`parseLlmJsonObject`) and the deterministic safety gate (`validateMenuImport` / `mergeStructuredMenu`) — kept pure so vitest pins the contract without a network or a key (see §8) |
 | `src/lib/*.test.ts` — 9 files, 181 tests | The suite: `menu-import`, `menu-scan` (parser), `ocr-quality`, `menu-sync-guard`, `image-utils`, `order-utils`, `rate-limit`, `worker-auth`, `worker-permissions` |
 | `src/lib/image-utils.ts` | `prepareUploadFile()` — client-side upload prep |
 | `src/components/onboarding/menu-scan-dialog.tsx` | The scan dialog UI + error display |
 
 Environment: `MISTRAL_API_KEY` (server-only) and optional `MISTRAL_OCR_MODEL`
-(see `.env.example`). **Only Mistral OCR is used — chat completions are never
-called** (the current subscription rate-limits chat completions with 429 code
-1300 while the OCR quota is separate). Structure comes from the OCR endpoint's
-built-in `document_annotation` (`json_schema`, strict). The annotation prompt asks
-for TND and converts EUR/USD approximately (1 € ≈ 3.4 DT, 1 $ ≈ 3.1 DT). The
-deterministic parser is blunter: a printed `€`/`$` number is read at face value
-as dinars (`sanitizePrice`), and a currency with no honest TND conversion (`£`,
-`¥`, `GBP`…) becomes `0` rather than a fabricated price.
+(see `.env.example`). **Within Mistral, only the OCR endpoint is used — Mistral
+chat completions are never called** (the current subscription rate-limits chat
+completions with 429 code 1300 while the OCR quota is separate). Structure comes
+from the OCR endpoint's built-in `document_annotation` (`json_schema`, strict).
+The annotation prompt asks for TND and converts EUR/USD approximately
+(1 € ≈ 3.4 DT, 1 $ ≈ 3.1 DT). The deterministic parser is blunter: a printed
+`€`/`$` number is read at face value as dinars (`sanitizePrice`), and a currency
+with no honest TND conversion (`£`, `¥`, `GBP`…) becomes `0` rather than a
+fabricated price.
+
+The **NVIDIA NIM structurer** is a separate provider, key and quota
+(`NVIDIA_API_KEY` server-only, plus optional `NVIDIA_BASE_URL` / `NVIDIA_MODEL` —
+see `.env.example`, and the entitlement trap below). It is the only stage that
+reads the OCR text as a *card* rather than as lines: the rules in
+`MENU_STRUCTURE_RULES` (`src/lib/menu-validate.ts`) classify every line as an
+item, a description, a section header or junk, so a wrapped description stays
+attached to the dish above it, a section header (`FOOD & DRINKS`) stops becoming
+a "product", and the dietary legend / address / footer are recognised as
+non-items. Rule 5 is the price contract the regex parser gets wrong: `1 200` is
+1200 (a space between digit groups is a thousands separator), `4.500 DT` is 4.5
+(three digits after the dot are millimes), and Arabic-Indic digits with the
+Arabic separators `٫` (decimal) and `٬` (thousands) are understood. The validator
+then re-normalizes every surviving price to millimes (a negative or non-finite
+value floors to `0`). Prices remain in dinars, the unit the app uses everywhere.
 
 Design decisions (do not casually undo):
 
-- **Both extraction paths always run.** The annotation (an LLM) is stochastic and
-  can under-extract; the deterministic parser always runs as a baseline, and
-  `reconcileImports` merges them (union of categories, product identity by
-  normalized name with `name\0category` disambiguation for the same dish in two
-  sections; parser price wins on disagreement; AI spelling wins on names).
+- **Both Mistral extraction paths always run; the NVIDIA structurer is the third
+  stage and does not replace them.** The annotation (an LLM) is stochastic and
+  can under-extract; the deterministic parser always runs as a baseline. When the
+  structurer is off or failed, `reconcileImports` unions the two (union of
+  categories, product identity by normalized name with `name\0category`
+  disambiguation for the same dish in two sections; parser price wins on
+  disagreement; AI spelling wins on names) — that is the union that put 36 junk
+  rows on the real café card. When the structurer answered, `mergeStructuredMenu`
+  runs instead: its shape is kept and the parser is used purely as a completeness
+  net — a *priced* row whose normalized name the structurer lacks is added, an
+  un-priced one is a fragment and is not.
+- **The NVIDIA structurer sets the shape; the validator sets the floor — the LLM
+  is an enhancement, not a dependency.** Measured on a real photographed café
+  card: the annotation + parser union produced **68 products, 36 of them
+  junk** — wrapped description fragments split into separate "products", the
+  section header `FOOD & DRINKS`, the three dietary-legend lines `V: Vegetarian`
+  / `VG: Vegan` / `GF: Gluten Free`, and the address/phone line, which imported
+  as a product priced `9999`). With the structurer answering, the same card
+  yields **32 products, all 32 priced, zero junk**, descriptions attached to
+  their items — and the validator had **nothing to remove** (`dropped=0`; that
+  run's LLM call took 42.5 s). The property that matters most: when the same
+  run's LLM call *failed* (one sample
+  timed out at the 60 s budget), the pipeline fell back to annotation + parser and
+  the validator removed **35 junk rows on its own**, producing the *same* 32
+  products, all priced, zero junk. So a scan must never fail because the LLM is
+  down: `structureMenuWithLlm` returns a typed outcome instead of throwing, and a
+  missing key, an outage, a timeout or a malformed reply all degrade to the path
+  that already existed. It retries **at most once** (only on a malformed reply,
+  and only if the scan budget still allows), and every call sits inside a
+  wall-clock deadline so the stage cannot outlive the scan.
+- **Be honest about the cost — the pass is slow.** The LLM answers in roughly
+  15–45 s and occasionally exceeds 60 s and times out; a scan with a working LLM
+  call took ~45–62 s end to end, while a scan with **no** `NVIDIA_API_KEY`
+  configured stays as fast as before (~10 s of OCR plus parsing). The structurer
+  is optional by design: faster without it, cleaner with it.
+- **Model entitlement is per account, not per model list.** NVIDIA's NIM model
+  list is public and lists **81 models**, but access is granted per account: a
+  probe with this key found only **5 of the 81 callable**, every other answering
+  HTTP 404 `Function '<uuid>': Not found for account` (the usable five were
+  `meta/llama-3.2-11b-vision-instruct`, `openai/gpt-oss-20b`,
+  `nvidia/nemotron-3.5-lightning-30b-a3b`, `meta/muse-glimmer-30b`,
+  `nvidia/nemotron-3-super-120b-a12b`). Of those, only
+  `meta/llama-3.2-11b-vision-instruct` was good — 15 s at benchmark, valid JSON,
+  20/20 priced, zero junk; the rest took 41–91 s and returned reasoning prose
+  instead of JSON. That is why it is the default `NVIDIA_MODEL`. The model is
+  also **stochastic even at `temperature: 0`**: the same prompt on the same
+  captured OCR output captured a section on one run and dropped it on another.
+  That is why the deterministic validator exists, and why a one-off scan result is
+  never "fixed" by trusting a single run — reproduce before changing anything.
 - **Quality gate before annotation/parser.** `assessOcrQuality` flags responses
   that are near-empty (`EMPTY_TEXT`), have no items (`NO_ITEMS`), carry several
   item lines with no heading and **not a single price** (`NO_STRUCTURE`), or end
@@ -365,6 +441,13 @@ through the same `ERROR_MSG_KEY`, so they have no HTTP status. The `STATUS` map
 in `route.ts` still carries `INVALID_MODEL_RESPONSE` and `INVALID_JSON` (both
 422) from an earlier revision — no code path raises either today.
 
+The NVIDIA structurer adds **no new error code and no new failure mode**. Its
+failures are internal log lines (`STRUCTURE LLM ok:false reason=…`), never a
+`MenuScanError` and never anything the dialog can show: only the Mistral/OCR path
+can fail a scan, and the structurer can only make the result better. That is the
+whole point of the fallback — a `NO_KEY`, an outage or a timeout must be
+invisible to the owner.
+
 Messages live in `src/lib/i18n.tsx` (EN/FR/AR) under `ms_error_*`; the dialog maps
 codes via `ERROR_MSG_KEY` in `menu-scan-dialog.tsx` and falls back to
 `ms_error_generic` for a code it does not know. Add a key to all three locales
@@ -376,8 +459,10 @@ when you add a code, and register the code in all four places listed in §8.
 
 > All scanner traces (stage logs, no secrets) go to the **server console** and
 > `.dev.log` / `.dev.err.log` in the project root (git-ignored). Grep
-> `.dev.log` for `FINAL ... categories= aiItems= parserItems=` to see exactly
-> what happened on a scan.
+> `.dev.log` for `FINAL ... categories= aiItems= parserItems= llmItems=` to see
+> exactly what happened on a scan, `STRUCTURE LLM` for the NVIDIA stage (its
+> `ok`, `reason`, `model` and `ms`), and `VALIDATE` for every row the gate
+> removed and why.
 
 1. **"Scan gives only 1 category (or catches all 4 only once in a while)".**
    Cause: the old client code downscaled every image to max **800px JPEG q0.82**
@@ -438,14 +523,34 @@ when you add a code, and register the code in all four places listed in §8.
    all three in one go.
 
 9. **ngrok is only needed to expose the dev server** (webhooks / real phone).
-   The scanner itself needs no tunnel: browser → `localhost:3000` → Mistral.
+   The scanner itself needs no tunnel: browser → `localhost:3000` → Mistral OCR,
+   then optionally NVIDIA NIM.
+
+10. **A scan with the structurer is slow, or logs `STRUCTURE LLM ok:false
+    reason:TIMEOUT`.** Expected, not a bug. The NVIDIA call runs in its own
+    60 s budget (clipped by the scan's 110 s), so a scan with a working LLM call
+    takes ~45–62 s end to end; `structureMenuWithLlm` answers in roughly 15–45 s
+    and its default model occasionally needs longer than 60 s. A timeout is a
+    *soft* failure: the pipeline falls back to annotation + parser and the
+    validator still yields a clean menu (§6), so the scan result is fine — only
+    the wall time differs. If you want the faster path back, unset
+    `NVIDIA_API_KEY`. Two related traps when you do keep it on:
+    - **A 404 `Function '<uuid>': Not found for account` is not a broken URL.**
+      It means the account is not entitled to that `NVIDIA_MODEL`; NVIDIA's
+      public list has 81 models but only a handful are callable per account
+      (§6). Stick with the default unless you have re-probed.
+    - **Never "fix" a scan by trusting one run.** The model is stochastic even at
+      `temperature: 0` — it caught a section on one run and dropped it on the
+      next over identical input. Compare the `VALIDATE` / `FINAL` lines across
+      two or three scans before concluding anything changed.
 
 ---
 
 ## 8. For the next developer — getting up to speed fast
 
 - **Run it:** `npm ci`, `cp .env.example .env.local` (fill Supabase keys +
-  a real `MISTRAL_API_KEY`), `npm run dev` → http://localhost:3000.
+  a real `MISTRAL_API_KEY` — `NVIDIA_API_KEY` is optional and only improves menu
+  structuring, see §6), `npm run dev` → http://localhost:3000.
 - **Verify a scan end-to-end without the UI:** grab your `sufra_owner_session`
   cookie from the browser (devtools → Application → Cookies) and post a real
   photo or PDF to the live route — the route is owner-only, so a bare request
@@ -458,10 +563,11 @@ when you add a code, and register the code in all four places listed in §8.
   ```
 
   Watch `.dev.log` for `OCR QUALITY`, `NETWORK RETRY`, `OCR RESPONSE PARSE`,
-  `FINAL`. There is no checked-in probe script (the old one lived in a
-  machine-specific temp directory) — the reproducible artifacts are this curl
-  and the SQL suite at `supabase/tests/schema_smoke.sql`; `docs/RUNBOOK.md` §6
-  is the full end-to-end checklist.
+  `STRUCTURE LLM`, `VALIDATE`, `FINAL`. There is no checked-in probe script (the
+  old one lived in a machine-specific temp directory) — the reproducible
+  artifacts are this curl and the SQL suite at
+  `supabase/tests/schema_smoke.sql`; `docs/RUNBOOK.md` §6 is the full end-to-end
+  checklist.
 - **Real menu fixtures used during development** (kept outside the repo because
   they're user photos): `Downloads\1131w-vQnxH5Nxwgc.webp` is **the production
   menu** — 4 categories **Coffee / Non Coffee / Pastries / Add-ons**, 20
@@ -485,6 +591,19 @@ when you add a code, and register the code in all four places listed in §8.
 - **If you change OCR tuning**, look at `OCR_QUALITY_ATTEMPTS`,
   `MAX_PAGES_PER_FILE`, and `ocr-quality.ts` thresholds
   (`MIN_NON_WS_CHARS=8`, `MIN_ITEMS_FOR_STRUCTURE=3`).
+- **If you change the NVIDIA structurer**, know the split: the *non-deterministic*
+  half (the request, the retry, the deadline) lives in the `"server-only"`
+  `src/lib/menu-structure-llm.ts`; the *pure* half (the prompt rules
+  `MENU_STRUCTURE_RULES`, the reply parser `parseLlmJsonObject`, and the gate
+  `validateMenuImport` / `mergeStructuredMenu`) lives in `src/lib/menu-validate.ts`
+  precisely so vitest can pin it without a network or a key — that is why the
+  measured contract (15 s, 20/20 priced, zero junk) cannot drift. The knobs:
+  `NVIDIA_MODEL` (env), `LLM_TIMEOUT_MS` (60 s/attempt), `MAX_INPUT_CHARS`
+  (30 000) and `MAX_TOKENS` (4096). Adding a price or classification rule means
+  editing `MENU_STRUCTURE_RULES` **and** its unit test together. Do **not** try to
+  make the gate "smarter" by trusting the model more: the model is stochastic even
+  at `temperature: 0` (§6), and the validator is what makes the result
+  reproducible.
 - **Product reality to respect:** owner is building a Tunisian café menu; prices
   in scanner annotations arrive in TND by design. Do **not** hard-code the
   restaurant name, the 4 categories, or any fixture file into the pipeline — the

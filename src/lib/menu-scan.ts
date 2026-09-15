@@ -12,14 +12,28 @@ dns.setDefaultResultOrder("ipv4first");
  * Pipeline: OCR (with whole-document json_schema annotation) → NORMALIZE →
  * SANITIZE → VALIDATE → MenuImportResult → onboarding store.
  *
- * Chat completions are intentionally NOT used: on the current subscription
- * tier they are rate-limited (429 code 1300) while the OCR quota is not.
+ * Mistral CHAT completions are intentionally NOT used: on the current
+ * subscription tier they are rate-limited (429 code 1300) while the OCR quota
+ * is not. The LLM stage of this pipeline is the NVIDIA NIM pass in
+ * `./menu-structure-llm` — a different provider, key and quota.
  *
- * Structure strategy (in order, both funnel through sanitizeImport):
- *   1. OCR `document_annotation` (json_schema) — primary, runs on the OCR
- *      quota. (stats.source: "ai")
- *   2. Deterministic local parser over the OCR markdown — recovers products
- *      whenever the annotation under-extracts. (stats.source: "fallback")
+ * Structure strategy, in order of authority:
+ *   1. NVIDIA structurer over the OCR markdown (`NVIDIA_API_KEY`) — it reads
+ *      the whole card, so a wrapped description stays a description and a
+ *      `1 200` price reads as 1200. It provides the SHAPE.
+ *      (stats.source: "llm" / "llm+parser")
+ *   2. Deterministic local parser over the same markdown — never a source of
+ *      shape, only the completeness net for a priced line the structurer
+ *      dropped, and the whole structure when (1) is unconfigured or fails.
+ *      (stats.source: "fallback")
+ *   3. OCR `document_annotation` (json_schema) — Mistral's own read of the
+ *      card, used with (2) through `reconcileImports` when (1) produced
+ *      nothing. (stats.source: "ai")
+ *
+ * Whichever path runs, the result passes `validateMenuImport`
+ * (`./menu-validate`), which removes the furniture a model can still emit —
+ * dietary legends, the address line, a section header that leaked in as a dish,
+ * a wrapped-line fragment — and reports every row it removed.
  *
  * The importer never knows which wizard step opened it — it always returns
  * the complete menu.
@@ -41,6 +55,12 @@ import {
   type MenuImportResult,
 } from "./menu-import";
 import { assessOcrQuality, documentText, type OcrPage } from "./ocr-quality";
+import { hasLlmBackend, llmModel, structureMenuWithLlm } from "./menu-structure-llm";
+import {
+  mergeStructuredMenu,
+  validateMenuImport,
+  type MenuValidationReport,
+} from "./menu-validate";
 
 export type { MenuImportResult, ImportedCategory } from "./menu-import";
 
@@ -770,10 +790,10 @@ export async function runMenuScan(
     const pages = outcomes.reduce((sum, o) => sum + o.pages, 0);
     log("OCR DONE", { docs: outcomes.length, pages, chars: markdown.length });
 
-    // 3. Structure phase. The OCR annotation (an LLM) is stochastic and can
-    // under-extract categories from one run to the next, so we ALWAYS run the
-    // deterministic parser too and keep whichever result is richer. This guards
-    // against "it found fewer categories than last time".
+    // 3. Structure phase — three candidates, in order of authority. The OCR
+    // annotation (an LLM) is stochastic and can under-extract categories from
+    // one run to the next, so the deterministic parser ALWAYS runs too; neither
+    // of them, however, understands the card the way the NVIDIA structurer does.
     log("STRUCTURE", { strategy: "ocr-annotation", model: OCR_MODEL });
     const rawAnnotationCategories: unknown[] = [];
     for (let i = 0; i < outcomes.length; i++) {
@@ -842,19 +862,94 @@ export async function runMenuScan(
           { files: files.length, pages, source: "fallback", model: "local-parser" },
         );
 
-    const best = reconcileImports(aiResult, fbResult);
+    // (c) The NVIDIA structurer over the same markdown. This is the only
+    // candidate that UNDERSTANDS the card — it is what knows that a line with
+    // no price continues the dish above it. When it answers it owns the shape
+    // and (a)/(b) are not unioned into it. It is also the only stage allowed to
+    // disappear: a missing key, an outage, a timeout, a malformed reply and an
+    // item-less reply all degrade to the annotation+parser path below, so an
+    // LLM outage can never fail a scan.
+    log("STRUCTURE", {
+      strategy: "nvidia-llm",
+      model: llmModel(),
+      key: hasLlmBackend() ? "configured" : "absent",
+    });
+    let structured: MenuImportResult | null = null;
+    if (hasLlmBackend() && markdown.trim()) {
+      const llm = await structureMenuWithLlm(markdown, venue, { deadline });
+      if (llm.ok) {
+        structured = llm.result;
+        log("STRUCTURE LLM", {
+          ok: true,
+          model: llm.model,
+          ms: llm.ms,
+          categories: llm.result.categories.length,
+          items: llm.result.products.length,
+        });
+      } else {
+        // model, elapsed ms and the failure reason only — never the key.
+        log("STRUCTURE LLM", {
+          ok: false,
+          reason: llm.reason,
+          status: llm.status,
+          model: llm.model,
+          ms: llm.ms,
+          detail: llm.detail,
+        });
+      }
+    } else {
+      log("STRUCTURE LLM", {
+        ok: false,
+        reason: hasLlmBackend() ? "NO_INPUT" : "NO_KEY",
+        model: llmModel(),
+      });
+    }
+
+    // (d) Merge and gate. With a structurer result the parser is a completeness
+    // net (a PRICED row whose normalized name the structurer does not have),
+    // never a union partner — see `mergeStructuredMenu`. Without one, the
+    // annotation+parser union runs as before and is gated by the SAME validator,
+    // which is where the 36 junk rows a real café card produced are removed.
+    // Every removal is logged rather than silently discarded (OCR-09).
+    const merged = structured ? mergeStructuredMenu(structured, fbResult) : null;
+    const chosen = merged && merged.result.products.length > 0 ? merged : null;
+    if (merged && !chosen) {
+      log("STRUCTURE LLM DISCARD", {
+        reason: "validation left no dish in the structurer's result",
+        dropped: merged.report.dropped.length,
+      });
+    }
+    let best: MenuImportResult;
+    let validation: MenuValidationReport;
+    if (chosen) {
+      best = chosen.result;
+      validation = chosen.report;
+    } else {
+      const gated = validateMenuImport(reconcileImports(aiResult, fbResult));
+      best = gated;
+      validation = gated.report;
+    }
+
     if (best.products.length === 0) {
       throw new MenuScanError("EMPTY", "No dishes or drinks could be read from the menu");
     }
+    log("VALIDATE", {
+      dropped: validation.dropped.length,
+      drops: validation.dropped,
+      droppedCategories: validation.droppedCategories,
+      pricesAdjusted: validation.pricesAdjusted,
+    });
     const items = best.products.length;
     log("FINAL", {
-      strategy: "reconcile",
+      strategy: chosen ? "llm-shape+parser-net" : "reconcile+validate",
       source: best.stats.source,
       model: best.stats.model,
       categories: best.categories.length,
       items,
       aiItems: aiResult.products.length,
       parserItems: fbResult.products.length,
+      llmItems: structured ? structured.products.length : 0,
+      parserRecovered: merged?.recovered,
       ms: Date.now() - t0,
     });
     return best;

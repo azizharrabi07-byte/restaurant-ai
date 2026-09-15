@@ -18,9 +18,11 @@
  *       ↓
  *   MenuImportResult (per source)
  *       ↓
- *   RECONCILE   (AI annotation + deterministic parser → one result)
+ *   RECONCILE   (structurer shape + parser completeness net — see
+ *                `menu-validate.ts`; the annotation+parser union below runs
+ *                only when the structurer is off or failed)
  *       ↓
- *   SANITIZE/VALIDATE
+ *   SANITIZE/VALIDATE  (sanitizeImport here; menu-validate.ts for the LLM path)
  *       ↓
  *   MenuImportResult (canonical)
  *       ↓
@@ -29,7 +31,15 @@
 
 export const UNCATEGORIZED = "Uncategorized";
 
-export type ImportSource = "ai" | "fallback";
+/**
+ * Which stage produced a menu import.
+ * - `"fallback"`: the deterministic local parser over the OCR markdown.
+ * - `"ai"`: Mistral's OCR annotation (`json_schema`) — the model's own read.
+ * - `"llm"`: the NVIDIA structurer (`./menu-structure-llm`).
+ * - `"llm+parser"`: the structurer's shape plus priced rows the deterministic
+ *   parser recovered that the structurer had dropped.
+ */
+export type ImportSource = "ai" | "fallback" | "llm" | "llm+parser";
 
 export interface ImportedCategory {
   name: string;
@@ -595,6 +605,14 @@ interface MergeSlot {
 /**
  * Deterministically merge the AI annotation result with the deterministic
  * parser result into ONE canonical MenuImportResult.
+ *
+ * WHEN THIS RUNS: `runMenuScan` calls it only when the NVIDIA structurer did
+ * not produce a menu (no key configured, or the call failed) — i.e. as the
+ * baseline path. When the structurer DID answer, the merge is
+ * `mergeStructuredMenu` in `./menu-validate`, which uses the parser purely as a
+ * completeness net instead of unioning both sources; that union is what put 36
+ * junk rows on a real café menu, because the two sources disagree about what an
+ * item IS. The invariants below are the contract of THIS function only.
  *
  * Identity of a dish is its normalized name (trim whitespace, collapse
  * repeated whitespace, lowercase; accents/punctuation preserved). A dish found
